@@ -882,26 +882,43 @@ namespace BflytPreview
 
 		bool PaneUsesPaletteColor(Pan1Pane p, RGBAColor color)
 		{
-			if (layout.Mat1?.Materials == null)
-				return false;
-
-			ushort? matIndex = null;
 			if (p is Pic1Pane pic)
-				matIndex = pic.MaterialIndex;
-			else if (p is Txt1Pane txt)
-				matIndex = txt.MaterialIndex;
-			else if (p is Wnd1Pane wnd)
 			{
-				if (wnd.Frames != null && wnd.Frames.Count > 0)
-					matIndex = wnd.Frames[0].MaterialIndex;
-				else if (wnd.Content != null)
-					matIndex = wnd.Content.MaterialIndex;
+				return pic.ColorTopLeft == color || pic.ColorTopRight == color
+					|| pic.ColorBottomLeft == color || pic.ColorBottomRight == color
+					|| MaterialUsesColor(pic.MaterialIndex, color);
 			}
+			if (p is Txt1Pane txt)
+			{
+				return txt.FontTopColor == color || txt.FontBottomColor == color
+					|| txt.ShadowTopColor == color || txt.ShadowBottomColor == color
+					|| MaterialUsesColor(txt.MaterialIndex, color);
+			}
+			if (p is Wnd1Pane wnd)
+			{
+				if (wnd.Content != null &&
+					(wnd.Content.ColorTopLeft == color || wnd.Content.ColorTopRight == color
+					 || wnd.Content.ColorBottomLeft == color || wnd.Content.ColorBottomRight == color))
+					return true;
+				if (wnd.Content != null && MaterialUsesColor(wnd.Content.MaterialIndex, color))
+					return true;
+				if (wnd.Frames != null)
+				{
+					foreach (var fr in wnd.Frames)
+					{
+						if (MaterialUsesColor(fr.MaterialIndex, color))
+							return true;
+					}
+				}
+			}
+			return false;
+		}
 
-			if (!matIndex.HasValue || matIndex.Value >= layout.Mat1.Materials.Count)
+		bool MaterialUsesColor(ushort matIndex, RGBAColor color)
+		{
+			if (layout.Mat1?.Materials == null || matIndex >= layout.Mat1.Materials.Count)
 				return false;
-
-			var mat = layout.Mat1.Materials[matIndex.Value];
+			var mat = layout.Mat1.Materials[matIndex];
 			return mat.ForegroundColor == color || mat.BackgroundColor == color;
 		}
 
@@ -996,7 +1013,7 @@ namespace BflytPreview
 					}
 
 					var paletteNode = MaterialsRoot.Nodes.Add("Palette");
-					paletteNode.Tag = new MaterialPaletteTag(layout.Mat1.Materials);
+					paletteNode.Tag = new MaterialPaletteTag(layout);
 					if (focus is MaterialPaletteTag)
 						focusElement = paletteNode;
 				}
@@ -1515,32 +1532,72 @@ namespace BflytPreview
 	}
 
 	/// <summary>
-	/// Single Palette tree node: exposes every unique material color in one PropertyGrid.
-	/// Editing a color replaces every Foreground/Background match across materials.
+	/// Palette tree node: unique material Black/White colors and pane/window/text vertex colors.
+	/// Editing a color replaces every matching slot of that kind across the layout.
 	/// </summary>
 	internal class MaterialPaletteTag : ICustomTypeDescriptor
 	{
+		readonly BflytFile layout;
 		readonly List<BflytMaterial> materials;
-		readonly List<RGBAColor> colors = new List<RGBAColor>();
+		readonly List<RGBAColor> materialColors = new List<RGBAColor>();
+		readonly List<RGBAColor> vertexColors = new List<RGBAColor>();
 
-		public MaterialPaletteTag(List<BflytMaterial> materials)
+		public MaterialPaletteTag(BflytFile layout)
 		{
-			this.materials = materials;
-			var seen = new HashSet<RGBAColor>();
+			this.layout = layout;
+			materials = layout.Mat1?.Materials ?? new List<BflytMaterial>();
+
+			var matSeen = new HashSet<RGBAColor>();
 			foreach (var mat in materials)
 			{
-				if (seen.Add(mat.ForegroundColor))
-					colors.Add(mat.ForegroundColor);
-				if (seen.Add(mat.BackgroundColor))
-					colors.Add(mat.BackgroundColor);
+				if (matSeen.Add(mat.ForegroundColor))
+					materialColors.Add(mat.ForegroundColor);
+				if (matSeen.Add(mat.BackgroundColor))
+					materialColors.Add(mat.BackgroundColor);
+			}
+
+			var vtxSeen = new HashSet<RGBAColor>();
+			void AddVtx(RGBAColor c)
+			{
+				if (vtxSeen.Add(c))
+					vertexColors.Add(c);
+			}
+
+			if (layout.ElementsRoot != null)
+			{
+				foreach (var pane in layout.EnumeratePanes(layout.ElementsRoot))
+				{
+					if (pane is Pic1Pane pic)
+					{
+						AddVtx(pic.ColorTopLeft);
+						AddVtx(pic.ColorTopRight);
+						AddVtx(pic.ColorBottomLeft);
+						AddVtx(pic.ColorBottomRight);
+					}
+					else if (pane is Wnd1Pane wnd && wnd.Content != null)
+					{
+						AddVtx(wnd.Content.ColorTopLeft);
+						AddVtx(wnd.Content.ColorTopRight);
+						AddVtx(wnd.Content.ColorBottomLeft);
+						AddVtx(wnd.Content.ColorBottomRight);
+					}
+					else if (pane is Txt1Pane txt)
+					{
+						AddVtx(txt.FontTopColor);
+						AddVtx(txt.FontBottomColor);
+						AddVtx(txt.ShadowTopColor);
+						AddVtx(txt.ShadowBottomColor);
+					}
+				}
 			}
 		}
 
-		internal RGBAColor GetColor(int index) => colors[index];
+		internal RGBAColor GetMaterialColor(int index) => materialColors[index];
+		internal RGBAColor GetVertexColor(int index) => vertexColors[index];
 
-		internal void SetColor(int index, RGBAColor newColor)
+		internal void SetMaterialColor(int index, RGBAColor newColor)
 		{
-			RGBAColor oldColor = colors[index];
+			RGBAColor oldColor = materialColors[index];
 			if (oldColor == newColor) return;
 
 			foreach (var mat in materials)
@@ -1550,16 +1607,83 @@ namespace BflytPreview
 				if (mat.BackgroundColor == oldColor)
 					mat.BackgroundColor = newColor;
 			}
-			colors[index] = newColor;
+			materialColors[index] = newColor;
 		}
 
-		int UsageCount(RGBAColor color)
+		internal void SetVertexColor(int index, RGBAColor newColor)
+		{
+			RGBAColor oldColor = vertexColors[index];
+			if (oldColor == newColor) return;
+
+			if (layout.ElementsRoot != null)
+			{
+				foreach (var pane in layout.EnumeratePanes(layout.ElementsRoot))
+				{
+					if (pane is Pic1Pane pic)
+					{
+						if (pic.ColorTopLeft == oldColor) pic.ColorTopLeft = newColor;
+						if (pic.ColorTopRight == oldColor) pic.ColorTopRight = newColor;
+						if (pic.ColorBottomLeft == oldColor) pic.ColorBottomLeft = newColor;
+						if (pic.ColorBottomRight == oldColor) pic.ColorBottomRight = newColor;
+					}
+					else if (pane is Wnd1Pane wnd && wnd.Content != null)
+					{
+						if (wnd.Content.ColorTopLeft == oldColor) wnd.Content.ColorTopLeft = newColor;
+						if (wnd.Content.ColorTopRight == oldColor) wnd.Content.ColorTopRight = newColor;
+						if (wnd.Content.ColorBottomLeft == oldColor) wnd.Content.ColorBottomLeft = newColor;
+						if (wnd.Content.ColorBottomRight == oldColor) wnd.Content.ColorBottomRight = newColor;
+					}
+					else if (pane is Txt1Pane txt)
+					{
+						if (txt.FontTopColor == oldColor) txt.FontTopColor = newColor;
+						if (txt.FontBottomColor == oldColor) txt.FontBottomColor = newColor;
+						if (txt.ShadowTopColor == oldColor) txt.ShadowTopColor = newColor;
+						if (txt.ShadowBottomColor == oldColor) txt.ShadowBottomColor = newColor;
+					}
+				}
+			}
+			vertexColors[index] = newColor;
+		}
+
+		int MaterialUsageCount(RGBAColor color)
 		{
 			int count = 0;
 			foreach (var mat in materials)
 			{
 				if (mat.ForegroundColor == color) count++;
 				if (mat.BackgroundColor == color) count++;
+			}
+			return count;
+		}
+
+		int VertexUsageCount(RGBAColor color)
+		{
+			int count = 0;
+			if (layout.ElementsRoot == null)
+				return 0;
+			foreach (var pane in layout.EnumeratePanes(layout.ElementsRoot))
+			{
+				if (pane is Pic1Pane pic)
+				{
+					if (pic.ColorTopLeft == color) count++;
+					if (pic.ColorTopRight == color) count++;
+					if (pic.ColorBottomLeft == color) count++;
+					if (pic.ColorBottomRight == color) count++;
+				}
+				else if (pane is Wnd1Pane wnd && wnd.Content != null)
+				{
+					if (wnd.Content.ColorTopLeft == color) count++;
+					if (wnd.Content.ColorTopRight == color) count++;
+					if (wnd.Content.ColorBottomLeft == color) count++;
+					if (wnd.Content.ColorBottomRight == color) count++;
+				}
+				else if (pane is Txt1Pane txt)
+				{
+					if (txt.FontTopColor == color) count++;
+					if (txt.FontBottomColor == color) count++;
+					if (txt.ShadowTopColor == color) count++;
+					if (txt.ShadowBottomColor == color) count++;
+				}
 			}
 			return count;
 		}
@@ -1578,12 +1702,19 @@ namespace BflytPreview
 
 		public PropertyDescriptorCollection GetProperties(Attribute[] attributes)
 		{
-			var props = new PropertyDescriptor[colors.Count];
-			for (int i = 0; i < colors.Count; i++)
+			var props = new PropertyDescriptor[materialColors.Count + vertexColors.Count];
+			int i = 0;
+			for (int m = 0; m < materialColors.Count; m++, i++)
 			{
-				var color = colors[i];
-				int usages = UsageCount(color);
-				props[i] = new PaletteColorPropertyDescriptor(i, color, usages);
+				var color = materialColors[m];
+				props[i] = new PaletteColorPropertyDescriptor(
+					m, color, MaterialUsageCount(color), isVertex: false);
+			}
+			for (int v = 0; v < vertexColors.Count; v++, i++)
+			{
+				var color = vertexColors[v];
+				props[i] = new PaletteColorPropertyDescriptor(
+					v, color, VertexUsageCount(color), isVertex: true);
 			}
 			return new PropertyDescriptorCollection(props);
 		}
@@ -1591,16 +1722,20 @@ namespace BflytPreview
 		sealed class PaletteColorPropertyDescriptor : PropertyDescriptor
 		{
 			readonly int index;
+			readonly bool isVertex;
 
-			public PaletteColorPropertyDescriptor(int index, RGBAColor color, int usages)
-				: base($"Color{index}", new Attribute[]
+			public PaletteColorPropertyDescriptor(int index, RGBAColor color, int usages, bool isVertex)
+				: base(isVertex ? $"Vertex{index}" : $"Material{index}", new Attribute[]
 				{
-					new CategoryAttribute("Palette"),
+					new CategoryAttribute(isVertex ? "Vertex colors" : "Materials"),
 					new DisplayNameAttribute($"{color}  ({usages})"),
-					new DescriptionAttribute($"Used in {usages} material color slot(s). Changing this updates every matching ForegroundColor/BackgroundColor.")
+					new DescriptionAttribute(isVertex
+						? $"Used in {usages} pic1/wnd1/txt1 vertex color slot(s). Changing this updates every matching corner/font color."
+						: $"Used in {usages} material color slot(s). Changing this updates every matching Black/White (Foreground/Background).")
 				})
 			{
 				this.index = index;
+				this.isVertex = isVertex;
 			}
 
 			public override Type ComponentType => typeof(MaterialPaletteTag);
@@ -1609,9 +1744,17 @@ namespace BflytPreview
 			public override bool CanResetValue(object component) => false;
 			public override void ResetValue(object component) { }
 			public override bool ShouldSerializeValue(object component) => false;
-			public override object GetValue(object component) => ((MaterialPaletteTag)component).GetColor(index);
-			public override void SetValue(object component, object value) =>
-				((MaterialPaletteTag)component).SetColor(index, (RGBAColor)value);
+			public override object GetValue(object component) =>
+				isVertex
+					? ((MaterialPaletteTag)component).GetVertexColor(index)
+					: ((MaterialPaletteTag)component).GetMaterialColor(index);
+			public override void SetValue(object component, object value)
+			{
+				if (isVertex)
+					((MaterialPaletteTag)component).SetVertexColor(index, (RGBAColor)value);
+				else
+					((MaterialPaletteTag)component).SetMaterialColor(index, (RGBAColor)value);
+			}
 		}
 	}
 }
