@@ -11,6 +11,7 @@ using SwitchThemes.Common.Bflan;
 using System.Text;
 using System.Linq;
 using SARCExt;
+using BflytPreview.Compression;
 
 namespace BflytPreview
 {
@@ -48,7 +49,7 @@ namespace BflytPreview
 
         private void openBFLYTToolStripMenuItem_Click(object sender, EventArgs e)
 		{
-			OpenFileDialog opn = new OpenFileDialog() { Filter = "Supported files (bflyt,szs,bflan)|*.bflyt;*.szs;*.bflan|All files|*.*" };
+			OpenFileDialog opn = new OpenFileDialog() { Filter = "Supported files|*.bflyt;*.bflan;*.szs;*.sarc;*.blarc;*.bfarc;*.pack;*.zs;*.zstd;*.zst|All files|*.*" };
 			if (opn.ShowDialog() != DialogResult.OK) return;
 			OpenFileFromDisk(opn.FileName);
 		}
@@ -81,16 +82,31 @@ namespace BflytPreview
 		public Form OpenFileFromDisk(string path) =>
 			OpenFile(File.ReadAllBytes(path), new DiskFileProvider(path));
 
-		public Form OpenFile(byte[] File, IFileWriter saveTo)
+		public Form OpenFile(byte[] File, IFileWriter saveTo, byte[] bntxData = null)
 		{
+			if (File == null || File.Length < 4)
+				return null;
+
 			string Magic = Encoding.ASCII.GetString(File, 0, 4);
 			Form result = null;
 			if (Magic == "Yaz0")
-				return OpenFile(ManagedYaz0.Decompress(File), saveTo);
+				return OpenFile(ManagedYaz0.Decompress(File), saveTo, bntxData);
+			else if (GameZstd.IsCompressed(File))
+			{
+				try
+				{
+					return OpenFile(GameZstd.Instance.Decompress(File), saveTo, bntxData);
+				}
+				catch (Exception ex)
+				{
+					MessageBox.Show(ex.Message, "ZSTD decompress failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+					return null;
+				}
+			}
 			else if (Magic == "SARC")
 				result = new EditorForms.SzsEditor(SARCExt.SARC.Unpack(File), saveTo, this);
 			else if (Magic == "FLYT")
-				result = new EditorView(new BflytFile(File), saveTo);
+				result = new EditorView(new BflytFile(File), saveTo, bntxData);
 			else if (Magic == "FLAN")
 				result = new BflanEditor(new BflanFile(File), saveTo);
 			
@@ -117,6 +133,12 @@ namespace BflytPreview
         {
 			CheckForUpdates(true);
         }
+
+		private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			using (var set = new SettingsWindow())
+				set.ShowDialog(this);
+		}
 
 		private void BFLANToolStripMenuItem_Click(object sender, EventArgs e)
 		{

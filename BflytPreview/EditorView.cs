@@ -12,6 +12,7 @@ using OpenTK;
 using OpenTK.Graphics.OpenGL;
 using OpenTK.Platform;
 using BflytPreview.EditorForms;
+using BflytPreview.Rendering;
 using System.Threading.Tasks;
 using SwitchThemes.Common.Bflyt;
 using static SwitchThemes.Common.Bflyt.BflytFile;
@@ -22,6 +23,7 @@ namespace BflytPreview
 	{
 		BflytFile layout;
 		IFileWriter _saveTo;
+		readonly BntxPreviewCache bntxPreview = new BntxPreviewCache();
 		public IFileWriter SaveTo
 		{
 			get => _saveTo;
@@ -56,12 +58,14 @@ namespace BflytPreview
 		bool hasPaletteHighlight;
 		RGBAColor paletteHighlightColor;
 
-		public EditorView(BflytFile _layout, IFileWriter saveTo)
+		public EditorView(BflytFile _layout, IFileWriter saveTo, byte[] bntxData = null)
 		{
 			KeyPreview = true;
 
 			InitializeComponent();
 			layout = _layout;
+			if (bntxData != null)
+				bntxPreview.Load(bntxData);
 
 			treeView1.NodeMouseClick += (sender, args) => treeView1.SelectedNode = args.Node;
 			propertyGrid1.SelectedGridItemChanged += propertyGrid1_SelectedGridItemChanged;
@@ -209,6 +213,10 @@ namespace BflytPreview
 			float[] DrawOnTopTransform = new float[16];
 			Pan1Pane DrawOnTop = null;
 
+			GL.Enable(EnableCap.Blend);
+			GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+			GL.Enable(EnableCap.Texture2D);
+
 			void RecursiveRenderPane(Pan1Pane p)
 			{
 				if (!p.ParentVisibility)
@@ -223,15 +231,25 @@ namespace BflytPreview
 
 				if (p.ViewInEditor)
 				{
-					if (treeView1.SelectedNode != null && (p == treeView1.SelectedNode.Tag as Pan1Pane))
+					bool isTreeSelected = treeView1.SelectedNode != null && (p == treeView1.SelectedNode.Tag as Pan1Pane);
+					bool isPaletteHit = hasPaletteHighlight && PaneUsesPaletteColor(p, paletteHighlightColor);
+
+					if (p is Pic1Pane pic)
+						DrawPicturePane(pic);
+					else if (p is Wnd1Pane wnd)
+						DrawWindowPane(wnd);
+
+					GL.Disable(EnableCap.Texture2D);
+					if (isTreeSelected)
 					{
 						DrawOnTop = p;
 						GL.GetFloat(GetPName.ModelviewMatrix, DrawOnTopTransform);
 					}
-					else if (hasPaletteHighlight && PaneUsesPaletteColor(p, paletteHighlightColor))
+					else if (isPaletteHit)
 						DrawPane(p.transformedRect, Settings.Default.SelectedColor);
 					else
 						DrawPane(p.transformedRect, color);
+					GL.Enable(EnableCap.Texture2D);
 				}
 
 				foreach (var c in p.Children.Where(x => x is Pan1Pane))
@@ -243,7 +261,12 @@ namespace BflytPreview
 			GL.Translate(x, y, 0);
 
 			RecursiveRenderPane(layout.ElementsRoot);
-			DrawPane(new CusRectangle(-1280 / 2, -720 / 2, 1280, 720), Settings.Default.OutlineColor);
+			{
+				var root = layout.ElementsRoot;
+				int rw = Math.Max(1, (int)root.Size.X);
+				int rh = Math.Max(1, (int)root.Size.Y);
+				DrawPane(new CusRectangle(-rw / 2, -rh / 2, rw, rh), Settings.Default.OutlineColor);
+			}
 
 			if (DrawOnTop != null)
 			{
@@ -251,6 +274,412 @@ namespace BflytPreview
                 DrawPane(DrawOnTop.transformedRect, Settings.Default.SelectedColor);
                 DrawPaneMiddlePoint(DrawOnTop.transformedRect, Settings.Default.SelectedColor);
             }
+
+			GL.Disable(EnableCap.Texture2D);
+			GL.Disable(EnableCap.Blend);
+		}
+
+		/// <summary>
+		/// Pic1 fill matching Switch Toolbox shading intent on fixed-function GL:
+		/// channel swizzle + white/black interpolate are baked into the bound texture
+		/// (see BntxPreviewCache); draw modulates by vertex color and applies UV SRT.
+		/// Custom GLSL is intentionally avoided — it repeatedly blanked the OpenTK preview.
+		/// </summary>
+		void DrawPicturePane(Pic1Pane pic)
+		{
+			BflytMaterial mat = null;
+			if (layout.Mat1?.Materials != null && pic.MaterialIndex < layout.Mat1.Materials.Count)
+				mat = layout.Mat1.Materials[pic.MaterialIndex];
+
+			// SwitchThemesCommon names are misleading: BFLYT stores BlackColor then WhiteColor
+			// (same order as Switch Toolbox). ForegroundColor == Black, BackgroundColor == White.
+			var black = mat != null ? ToVec4(mat.ForegroundColor) : new Vector4(0f, 0f, 0f, 0f);
+			var white = mat != null ? ToVec4(mat.BackgroundColor) : new Vector4(1f, 1f, 1f, 1f);
+			if (white.W <= 0f)
+				white.W = 1f;
+
+			bool hasTexture = false;
+			int texId = 0;
+			var wrapS = BflytMaterial.TextureReference.WRAPS.Clamp;
+			var wrapT = BflytMaterial.TextureReference.WRAPS.Clamp;
+			Matrix4 texTransform = LayoutPic1Shader.IdentityTransform;
+
+			if (mat?.Textures != null && mat.Textures.Length > 0)
+			{
+				hasTexture = bntxPreview.BindPic1Texture(layout, pic, white, black, out texId, out wrapS, out wrapT);
+				if (mat.TextureTransformations != null && mat.TextureTransformations.Length > 0)
+				{
+					var t = mat.TextureTransformations[0];
+					texTransform = LayoutPic1Shader.BuildTextureTransform(t.X, t.Y, t.Rotation, t.ScaleX, t.ScaleY);
+				}
+			}
+
+			float paneAlpha = pic.Alpha / 255f;
+			if (paneAlpha <= 0f)
+				paneAlpha = 1f;
+
+			Vector4 cTL = ToVec4(pic.ColorTopLeft, paneAlpha);
+			Vector4 cTR = ToVec4(pic.ColorTopRight, paneAlpha);
+			Vector4 cBL = ToVec4(pic.ColorBottomLeft, paneAlpha);
+			Vector4 cBR = ToVec4(pic.ColorBottomRight, paneAlpha);
+			if (cTL.W <= 0f && cTR.W <= 0f && cBL.W <= 0f && cBR.W <= 0f)
+			{
+				cTL.W = cTR.W = cBL.W = cBR.W = paneAlpha;
+			}
+
+			var rect = pic.transformedRect;
+			var uv = (pic.UVCoords != null && pic.UVCoords.Length > 0)
+				? pic.UVCoords[0]
+				: new Pic1Pane.UVCoord
+				{
+					TopLeft = (0, 0),
+					TopRight = (1, 0),
+					BottomLeft = (0, 1),
+					BottomRight = (1, 1)
+				};
+
+			GL.ActiveTexture(TextureUnit.Texture0);
+			if (hasTexture)
+			{
+				GL.Enable(EnableCap.Texture2D);
+				GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)ToGlWrap(wrapS));
+				GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)ToGlWrap(wrapT));
+			}
+			else
+			{
+				GL.BindTexture(TextureTarget.Texture2D, 0);
+				GL.Disable(EnableCap.Texture2D);
+			}
+
+			// Shading already baked into texture; only modulate by vertex color.
+			GL.Begin(PrimitiveType.Quads);
+			if (hasTexture)
+			{
+				GL.Color4(cTL.X, cTL.Y, cTL.Z, cTL.W);
+				EmitTransformedTexCoord(texTransform, uv.TopLeft.X, uv.TopLeft.Y);
+				GL.Vertex2(rect.x, rect.y);
+				GL.Color4(cTR.X, cTR.Y, cTR.Z, cTR.W);
+				EmitTransformedTexCoord(texTransform, uv.TopRight.X, uv.TopRight.Y);
+				GL.Vertex2(rect.x + rect.width, rect.y);
+				GL.Color4(cBR.X, cBR.Y, cBR.Z, cBR.W);
+				EmitTransformedTexCoord(texTransform, uv.BottomRight.X, uv.BottomRight.Y);
+				GL.Vertex2(rect.x + rect.width, rect.y + rect.height);
+				GL.Color4(cBL.X, cBL.Y, cBL.Z, cBL.W);
+				EmitTransformedTexCoord(texTransform, uv.BottomLeft.X, uv.BottomLeft.Y);
+				GL.Vertex2(rect.x, rect.y + rect.height);
+			}
+			else
+			{
+				// Untextured: Toolbox tex=1 → fill white*vertex (black unused).
+				Vector4 Tint(Vector4 c) => new Vector4(c.X * white.X, c.Y * white.Y, c.Z * white.Z, c.W * white.W);
+				var t = Tint(cTL);
+				GL.Color4(t.X, t.Y, t.Z, t.W); GL.Vertex2(rect.x, rect.y);
+				t = Tint(cTR);
+				GL.Color4(t.X, t.Y, t.Z, t.W); GL.Vertex2(rect.x + rect.width, rect.y);
+				t = Tint(cBR);
+				GL.Color4(t.X, t.Y, t.Z, t.W); GL.Vertex2(rect.x + rect.width, rect.y + rect.height);
+				t = Tint(cBL);
+				GL.Color4(t.X, t.Y, t.Z, t.W); GL.Vertex2(rect.x, rect.y + rect.height);
+			}
+			GL.End();
+
+			GL.BindTexture(TextureTarget.Texture2D, 0);
+			GL.Enable(EnableCap.Texture2D);
+		}
+
+		/// <summary>
+		/// Simplified Cafe window draw. HorizontalNoContent (e.g. LoadingFade W_SideBGDeco)
+		/// paints the right rail with frame[0] (LoadingSideBG) and the left strip with frame[1].
+		/// Other kinds draw content when present, then cover with frame[0] if needed.
+		/// </summary>
+		void DrawWindowPane(Wnd1Pane wnd)
+		{
+			if (wnd?.Content == null)
+				return;
+
+			float paneAlpha = wnd.Alpha / 255f;
+			if (paneAlpha <= 0f)
+				paneAlpha = 1f;
+
+			Vector4 cTL = ToVec4(wnd.Content.ColorTopLeft, paneAlpha);
+			Vector4 cTR = ToVec4(wnd.Content.ColorTopRight, paneAlpha);
+			Vector4 cBL = ToVec4(wnd.Content.ColorBottomLeft, paneAlpha);
+			Vector4 cBR = ToVec4(wnd.Content.ColorBottomRight, paneAlpha);
+			if (cTL.W <= 0f && cTR.W <= 0f && cBL.W <= 0f && cBR.W <= 0f)
+				cTL.W = cTR.W = cBL.W = cBR.W = paneAlpha;
+
+			var rect = wnd.transformedRect;
+			float dX = rect.x;
+			float dY = rect.y;
+			float paneW = rect.width;
+			float paneH = rect.height;
+			if (paneW <= 0f || paneH <= 0f)
+				return;
+
+			float frameLeft = wnd.FrameElementLeft;
+			float frameRight = wnd.FrameElementRight;
+			float frameTop = wnd.FrameElementTop;
+			float frameBottom = wnd.FrameElementBottom;
+
+			if (wnd.Frames != null && wnd.Frames.Count > 0)
+			{
+				// FrameCount 1 and 2: Toolbox (and the game) size strips from frame[0]'s texture
+				// when FrameElement L/R are left at 0 (LoadingFade W_SideBGDeco = 190×1080).
+				if ((wnd.FrameCount == 1 || wnd.FrameCount == 2) &&
+					bntxPreview.TryGetTextureSize(layout, wnd.Frames[0].MaterialIndex, out float oneW, out float oneH))
+				{
+					if (frameLeft <= 0f) frameLeft = oneW;
+					if (frameRight <= 0f) frameRight = oneW;
+					if (frameTop <= 0f) frameTop = oneH;
+					if (frameBottom <= 0f) frameBottom = oneH;
+				}
+				else if ((wnd.FrameCount == 4 || wnd.FrameCount == 8) && wnd.Frames.Count >= 4)
+				{
+					if (bntxPreview.TryGetTextureSize(layout, wnd.Frames[0].MaterialIndex, out float fl, out float ft))
+					{
+						if (frameLeft <= 0f) frameLeft = fl;
+						if (frameTop <= 0f) frameTop = ft;
+					}
+					if (bntxPreview.TryGetTextureSize(layout, wnd.Frames[3].MaterialIndex, out float fr, out float fb))
+					{
+						if (frameRight <= 0f) frameRight = fr;
+						if (frameBottom <= 0f) frameBottom = fb;
+					}
+				}
+			}
+
+			if (frameLeft <= 0f && wnd.FrameElementLeft > 0) frameLeft = wnd.FrameElementLeft;
+			if (frameRight <= 0f && wnd.FrameElementRight > 0) frameRight = wnd.FrameElementRight;
+			if (frameTop <= 0f && wnd.FrameElementTop > 0) frameTop = wnd.FrameElementTop;
+			if (frameBottom <= 0f && wnd.FrameElementBottom > 0) frameBottom = wnd.FrameElementBottom;
+
+			// Content (not drawn for HorizontalNoContent — matches Toolbox).
+			if (wnd.Kind != Wnd1Pane.WindowKind.HorizontalNoContent)
+			{
+				var uv = (wnd.Content.UVCoords != null && wnd.Content.UVCoords.Length > 0)
+					? wnd.Content.UVCoords[0]
+					: new Pic1Pane.UVCoord
+					{
+						TopLeft = (0, 0),
+						TopRight = (1, 0),
+						BottomLeft = (0, 1),
+						BottomRight = (1, 1)
+					};
+
+				float fl = Math.Max(0f, frameLeft);
+				float fr = Math.Max(0f, frameRight);
+				float ft = Math.Max(0f, frameTop);
+				float fb = Math.Max(0f, frameBottom);
+
+				float contentX = dX + fl - wnd.StretchLeft;
+				float contentY = wnd.Kind == Wnd1Pane.WindowKind.Horizontal
+					? dY
+					: dY + ft - wnd.StretchTop;
+				float contentW = ((wnd.StretchLeft + (paneW - fl)) - fr) + wnd.StretchRight;
+				float contentH = wnd.Kind == Wnd1Pane.WindowKind.Horizontal
+					? paneH
+					: ((wnd.StretchTop + (paneH - ft)) - fb) + wnd.StretchBottom;
+
+				DrawTexturedQuad(
+					wnd.Content.MaterialIndex,
+					contentX, contentY, contentW, contentH,
+					uv.TopLeft.X, uv.TopLeft.Y,
+					uv.TopRight.X, uv.TopRight.Y,
+					uv.BottomRight.X, uv.BottomRight.Y,
+					uv.BottomLeft.X, uv.BottomLeft.Y,
+					cTL, cTR, cBR, cBL);
+			}
+
+			if (wnd.Frames == null || wnd.Frames.Count == 0)
+				return;
+
+			Vector4[] frameColors = wnd.UseVertexColorForAll
+				? new[] { cTL, cTR, cBR, cBL }
+				: new[]
+				{
+					new Vector4(1f, 1f, 1f, paneAlpha),
+					new Vector4(1f, 1f, 1f, paneAlpha),
+					new Vector4(1f, 1f, 1f, paneAlpha),
+					new Vector4(1f, 1f, 1f, paneAlpha)
+				};
+
+			if (wnd.Kind == Wnd1Pane.WindowKind.HorizontalNoContent)
+			{
+				// LoadingSideBG is an alpha mask (BNTX swizzle RGB=One, A=Red): transparent
+				// jagged edge on the left, cream body on the right of the strip. Do NOT paint
+				// an opaque fill under the strip — that kills the alpha edge (map/BG must show).
+				float stripW = frameLeft > 0f ? frameLeft : frameRight;
+				if (stripW <= 0f &&
+					bntxPreview.TryGetTextureSize(layout, wnd.Frames[0].MaterialIndex, out float tw, out float th) &&
+					th > 0f)
+				{
+					stripW = tw * (paneH / th);
+				}
+				if (stripW <= 0f)
+					stripW = paneW;
+				stripW = Math.Min(stripW, paneW);
+
+				// Cream / White8 only for the opaque remainder to the right of the mask strip.
+				if (paneW - stripW > 0.5f)
+				{
+					ushort fillMat = wnd.Frames.Count >= 2
+						? wnd.Frames[1].MaterialIndex
+						: wnd.Content.MaterialIndex;
+					DrawTexturedQuad(
+						fillMat,
+						dX + stripW, dY, paneW - stripW, paneH,
+						0f, 0f, 1f, 0f, 1f, 1f, 0f, 1f,
+						cTL, cTR, cBR, cBL);
+				}
+
+				// Vertex colors tint the opaque texels (cream); alpha comes from the baked mask.
+				DrawTexturedQuad(
+					wnd.Frames[0].MaterialIndex,
+					dX, dY, stripW, paneH,
+					0f, 0f, 1f, 0f, 1f, 1f, 0f, 1f,
+					cTL, cTR, cBR, cBL);
+			}
+			else if (wnd.Kind == Wnd1Pane.WindowKind.Horizontal)
+			{
+				float fl = Math.Max(1f, frameLeft);
+				float fr = Math.Max(1f, frameRight);
+				DrawTexturedQuad(
+					wnd.Frames[0].MaterialIndex,
+					dX, dY, fl, paneH,
+					0f, 0f, 1f, 0f, 1f, 1f, 0f, 1f,
+					frameColors[1], frameColors[1], frameColors[2], frameColors[2]);
+
+				ushort rightMat = wnd.Frames.Count >= 2
+					? wnd.Frames[1].MaterialIndex
+					: wnd.Frames[0].MaterialIndex;
+				float contentW = ((wnd.StretchLeft + (paneW - fl)) - fr) + wnd.StretchRight;
+				DrawTexturedQuad(
+					rightMat,
+					dX + fr + contentW, dY, fr, paneH,
+					1f, 0f, 0f, 0f, 0f, 1f, 1f, 1f,
+					frameColors[0], frameColors[0], frameColors[3], frameColors[3]);
+			}
+			else
+			{
+				float fl = Math.Max(1f, frameLeft);
+				float fr = Math.Max(0f, frameRight);
+				float ft = Math.Max(1f, frameTop);
+				float pieceW = paneW - fr;
+				float pieceH = ft;
+				float uExtent = (paneW - fl) / fl;
+				DrawTexturedQuad(
+					wnd.Frames[0].MaterialIndex,
+					dX, dY, pieceW, pieceH,
+					0f, 0f, uExtent, 0f, uExtent, 1f, 0f, 1f,
+					frameColors[0], frameColors[1], frameColors[2], frameColors[3]);
+			}
+		}
+
+		void DrawTexturedQuad(
+			ushort materialIndex,
+			float x, float y, float w, float h,
+			float u0, float v0, float u1, float v1, float u2, float v2, float u3, float v3,
+			Vector4 c0, Vector4 c1, Vector4 c2, Vector4 c3)
+		{
+			if (w <= 0f || h <= 0f)
+				return;
+
+			BflytMaterial mat = null;
+			if (layout.Mat1?.Materials != null && materialIndex < layout.Mat1.Materials.Count)
+				mat = layout.Mat1.Materials[materialIndex];
+
+			var black = mat != null ? ToVec4(mat.ForegroundColor) : new Vector4(0f, 0f, 0f, 0f);
+			var white = mat != null ? ToVec4(mat.BackgroundColor) : new Vector4(1f, 1f, 1f, 1f);
+			if (white.W <= 0f)
+				white.W = 1f;
+
+			bool hasTexture = false;
+			var wrapS = BflytMaterial.TextureReference.WRAPS.Clamp;
+			var wrapT = BflytMaterial.TextureReference.WRAPS.Clamp;
+			Matrix4 texTransform = LayoutPic1Shader.IdentityTransform;
+
+			if (mat?.Textures != null && mat.Textures.Length > 0)
+			{
+				hasTexture = bntxPreview.BindMaterialTexture(layout, materialIndex, white, black, out _, out wrapS, out wrapT);
+				if (mat.TextureTransformations != null && mat.TextureTransformations.Length > 0)
+				{
+					var t = mat.TextureTransformations[0];
+					texTransform = LayoutPic1Shader.BuildTextureTransform(t.X, t.Y, t.Rotation, t.ScaleX, t.ScaleY);
+				}
+			}
+
+			GL.ActiveTexture(TextureUnit.Texture0);
+			if (hasTexture)
+			{
+				GL.Enable(EnableCap.Texture2D);
+				GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)ToGlWrap(wrapS));
+				GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)ToGlWrap(wrapT));
+			}
+			else
+			{
+				GL.BindTexture(TextureTarget.Texture2D, 0);
+				GL.Disable(EnableCap.Texture2D);
+			}
+
+			GL.Begin(PrimitiveType.Quads);
+			if (hasTexture)
+			{
+				GL.Color4(c0.X, c0.Y, c0.Z, c0.W);
+				EmitTransformedTexCoord(texTransform, u0, v0);
+				GL.Vertex2(x, y);
+				GL.Color4(c1.X, c1.Y, c1.Z, c1.W);
+				EmitTransformedTexCoord(texTransform, u1, v1);
+				GL.Vertex2(x + w, y);
+				GL.Color4(c2.X, c2.Y, c2.Z, c2.W);
+				EmitTransformedTexCoord(texTransform, u2, v2);
+				GL.Vertex2(x + w, y + h);
+				GL.Color4(c3.X, c3.Y, c3.Z, c3.W);
+				EmitTransformedTexCoord(texTransform, u3, v3);
+				GL.Vertex2(x, y + h);
+			}
+			else
+			{
+				Vector4 Tint(Vector4 c) => new Vector4(c.X * white.X, c.Y * white.Y, c.Z * white.Z, c.W * white.W);
+				var t = Tint(c0);
+				GL.Color4(t.X, t.Y, t.Z, t.W); GL.Vertex2(x, y);
+				t = Tint(c1);
+				GL.Color4(t.X, t.Y, t.Z, t.W); GL.Vertex2(x + w, y);
+				t = Tint(c2);
+				GL.Color4(t.X, t.Y, t.Z, t.W); GL.Vertex2(x + w, y + h);
+				t = Tint(c3);
+				GL.Color4(t.X, t.Y, t.Z, t.W); GL.Vertex2(x, y + h);
+			}
+			GL.End();
+
+			GL.BindTexture(TextureTarget.Texture2D, 0);
+			GL.Enable(EnableCap.Texture2D);
+		}
+
+		static void EmitTransformedTexCoord(Matrix4 transform, float u, float v)
+		{
+			var vec = new Vector4(u, v, 0f, 1f);
+			Vector4.Transform(ref vec, ref transform, out var result);
+			GL.TexCoord2(0.5f + result.X, 0.5f + result.Y);
+		}
+
+		static Vector4 ToVec4(RGBAColor c, float alphaMul = 1f) =>
+			new Vector4(c.R / 255f, c.G / 255f, c.B / 255f, (c.A / 255f) * alphaMul);
+
+		/// <summary>
+		/// Toolbox stores wrap in the low 2 bits of the flag byte (filter in the upper bits).
+		/// </summary>
+		static TextureWrapMode ToGlWrap(BflytMaterial.TextureReference.WRAPS wrap)
+		{
+			switch ((BflytMaterial.TextureReference.WRAPS)((byte)wrap & 0x3))
+			{
+				case BflytMaterial.TextureReference.WRAPS.NearRepeat:
+					return TextureWrapMode.Repeat;
+				case BflytMaterial.TextureReference.WRAPS.NearMirror:
+				case BflytMaterial.TextureReference.WRAPS.GX2MirrorOnce:
+					return TextureWrapMode.MirroredRepeat;
+				default:
+					return TextureWrapMode.ClampToEdge;
+			}
 		}
 
 		bool PaneUsesPaletteColor(Pan1Pane p, RGBAColor color)
@@ -263,6 +692,13 @@ namespace BflytPreview
 				matIndex = pic.MaterialIndex;
 			else if (p is Txt1Pane txt)
 				matIndex = txt.MaterialIndex;
+			else if (p is Wnd1Pane wnd)
+			{
+				if (wnd.Frames != null && wnd.Frames.Count > 0)
+					matIndex = wnd.Frames[0].MaterialIndex;
+				else if (wnd.Content != null)
+					matIndex = wnd.Content.MaterialIndex;
+			}
 
 			if (!matIndex.HasValue || matIndex.Value >= layout.Mat1.Materials.Count)
 				return false;
@@ -581,6 +1017,7 @@ namespace BflytPreview
 
 		private void EditorView_FormClosed(object sender, FormClosedEventArgs e)
 		{
+			bntxPreview.Dispose();
 			SaveTo?.EditorClosed();
 			Settings.Default.ShowImage = false;
 		}

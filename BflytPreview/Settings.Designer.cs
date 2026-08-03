@@ -82,5 +82,17 @@ namespace BflytPreview {
                 this["ShowImage"] = value;
             }
         }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string ZsDicPackPath {
+            get {
+                return ((string)(this["ZsDicPackPath"]));
+            }
+            set {
+                this["ZsDicPackPath"] = value;
+            }
+        }
     }
 }

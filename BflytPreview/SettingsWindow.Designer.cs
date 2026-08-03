@@ -38,6 +38,9 @@
             this.loadBackgroundImage = new System.Windows.Forms.Button();
             this.pictureBox1 = new System.Windows.Forms.PictureBox();
             this.showImg = new System.Windows.Forms.Button();
+            this.labelZsDic = new System.Windows.Forms.Label();
+            this.txtZsDicPath = new System.Windows.Forms.TextBox();
+            this.btnBrowseZsDic = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
             this.SuspendLayout();
             // 
@@ -124,11 +127,43 @@
             this.showImg.UseVisualStyleBackColor = true;
             this.showImg.Click += new System.EventHandler(this.showImg_Click);
             // 
+            // labelZsDic
+            // 
+            this.labelZsDic.AutoSize = true;
+            this.labelZsDic.Location = new System.Drawing.Point(13, 168);
+            this.labelZsDic.Name = "labelZsDic";
+            this.labelZsDic.Size = new System.Drawing.Size(149, 13);
+            this.labelZsDic.TabIndex = 9;
+            this.labelZsDic.Text = "ZsDic.pack.zs (TotK ZSTD dict)";
+            // 
+            // txtZsDicPath
+            // 
+            this.txtZsDicPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.txtZsDicPath.Location = new System.Drawing.Point(16, 186);
+            this.txtZsDicPath.Name = "txtZsDicPath";
+            this.txtZsDicPath.Size = new System.Drawing.Size(286, 20);
+            this.txtZsDicPath.TabIndex = 10;
+            // 
+            // btnBrowseZsDic
+            // 
+            this.btnBrowseZsDic.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnBrowseZsDic.Location = new System.Drawing.Point(308, 184);
+            this.btnBrowseZsDic.Name = "btnBrowseZsDic";
+            this.btnBrowseZsDic.Size = new System.Drawing.Size(75, 23);
+            this.btnBrowseZsDic.TabIndex = 11;
+            this.btnBrowseZsDic.Text = "Browse...";
+            this.btnBrowseZsDic.UseVisualStyleBackColor = true;
+            this.btnBrowseZsDic.Click += new System.EventHandler(this.btnBrowseZsDic_Click);
+            // 
             // SettingsWindow
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(393, 173);
+            this.ClientSize = new System.Drawing.Size(393, 224);
+            this.Controls.Add(this.btnBrowseZsDic);
+            this.Controls.Add(this.txtZsDicPath);
+            this.Controls.Add(this.labelZsDic);
             this.Controls.Add(this.showImg);
             this.Controls.Add(this.pictureBox1);
             this.Controls.Add(this.loadBackgroundImage);
@@ -141,6 +176,7 @@
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Name = "SettingsWindow";
             this.Text = "Settings";
+            this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.SettingsWindow_FormClosing);
             this.Load += new System.EventHandler(this.SettingsWindow_Load);
             ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).EndInit();
             this.ResumeLayout(false);
@@ -159,5 +195,8 @@
         private System.Windows.Forms.Button loadBackgroundImage;
         private System.Windows.Forms.PictureBox pictureBox1;
         private System.Windows.Forms.Button showImg;
+        private System.Windows.Forms.Label labelZsDic;
+        private System.Windows.Forms.TextBox txtZsDicPath;
+        private System.Windows.Forms.Button btnBrowseZsDic;
     }
 }

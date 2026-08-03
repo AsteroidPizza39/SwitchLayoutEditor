@@ -214,12 +214,39 @@ namespace BflytPreview.EditorForms
             }
 
             var provider = new SzsFileProvider(this, Fname);
-            var form = MainForm.OpenFile(loadedSarc.Files[Fname], provider);
+            byte[] bntxData = null;
+            if (Fname.EndsWith(".bflyt", StringComparison.OrdinalIgnoreCase))
+                bntxData = FindPreviewBntx();
+
+            var form = MainForm.OpenFile(loadedSarc.Files[Fname], provider, bntxData);
             if (form != null)
             {
                 provider.EditorForm = form;
                 FileProviders.Add(provider);
             }
+        }
+
+        byte[] FindPreviewBntx()
+        {
+            const string combined = "timg/__Combined.bntx";
+            if (loadedSarc.Files.TryGetValue(combined, out var combinedBytes))
+                return combinedBytes;
+
+            // TotK UI archives usually ship one fat combined BNTX under timg/ (not always
+            // named __Combined). Prefer the largest .bntx so a tiny stub cannot win.
+            byte[] best = null;
+            int bestLen = -1;
+            foreach (var kv in loadedSarc.Files)
+            {
+                if (!kv.Key.EndsWith(".bntx", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (kv.Value != null && kv.Value.Length > bestLen)
+                {
+                    best = kv.Value;
+                    bestLen = kv.Value.Length;
+                }
+            }
+            return best;
         }
 
         private void replaceToolStripMenuItem1_Click(object sender, EventArgs e)

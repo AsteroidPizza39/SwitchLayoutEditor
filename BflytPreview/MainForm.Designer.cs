@@ -37,6 +37,7 @@
             this.createSzsFromFolderToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.layoutDiffToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.settingsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.checkUpdateToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.splitContainer1 = new System.Windows.Forms.SplitContainer();
             this.splitContainer2 = new System.Windows.Forms.SplitContainer();
@@ -66,6 +67,7 @@
             this.menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.fileToolStripMenuItem,
             this.toolsToolStripMenuItem,
+            this.settingsToolStripMenuItem,
             this.checkUpdateToolStripMenuItem});
             this.menuStrip1.Location = new System.Drawing.Point(0, 0);
             this.menuStrip1.Name = "menuStrip1";
@@ -127,6 +129,13 @@
             this.layoutDiffToolStripMenuItem.Size = new System.Drawing.Size(180, 22);
             this.layoutDiffToolStripMenuItem.Text = "Layout diff";
             this.layoutDiffToolStripMenuItem.Click += new System.EventHandler(this.layoutDiffToolStripMenuItem_Click);
+            // 
+            // settingsToolStripMenuItem
+            // 
+            this.settingsToolStripMenuItem.Name = "settingsToolStripMenuItem";
+            this.settingsToolStripMenuItem.Size = new System.Drawing.Size(61, 20);
+            this.settingsToolStripMenuItem.Text = "Settings";
+            this.settingsToolStripMenuItem.Click += new System.EventHandler(this.settingsToolStripMenuItem_Click);
             // 
             // checkUpdateToolStripMenuItem
             // 
@@ -289,6 +298,7 @@
         private System.Windows.Forms.Panel pnlSubSystem;
 		private System.Windows.Forms.ToolStripMenuItem toolsToolStripMenuItem;
 		private System.Windows.Forms.ToolStripMenuItem layoutDiffToolStripMenuItem;
+		private System.Windows.Forms.ToolStripMenuItem settingsToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem checkUpdateToolStripMenuItem;
 		private System.Windows.Forms.ToolStripMenuItem importJSONToolStripMenuItem;
 		private System.Windows.Forms.ToolStripMenuItem bFLANToolStripMenuItem;

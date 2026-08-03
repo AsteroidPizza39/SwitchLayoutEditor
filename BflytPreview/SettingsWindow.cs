@@ -1,12 +1,8 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.IO;
 using System.Windows.Forms;
+using BflytPreview.Compression;
 
 namespace BflytPreview
 {
@@ -22,8 +18,8 @@ namespace BflytPreview
             pickColor.BackColor = Settings.Default.PaneColor;
             selectedColor.BackColor = Settings.Default.SelectedColor;
             outlineColor.BackColor = Settings.Default.OutlineColor;
-            Console.WriteLine(Settings.Default.BgFileName);
-            if (!string.IsNullOrEmpty(Settings.Default.BgFileName))
+            txtZsDicPath.Text = Settings.Default.ZsDicPackPath ?? string.Empty;
+            if (!string.IsNullOrEmpty(Settings.Default.BgFileName) && File.Exists(Settings.Default.BgFileName))
             {
                 pictureBox1.BackgroundImage = Image.FromFile(Settings.Default.BgFileName);
                 EditorView.texture = EditorView.LoadBgImage(Settings.Default.BgFileName, false, true);
@@ -34,12 +30,15 @@ namespace BflytPreview
 
         private void SettingsWindow_FormClosing(object sender, FormClosingEventArgs e)
         {
-
             Settings.Default.PaneColor = pickColor.BackColor;
             Settings.Default.SelectedColor = selectedColor.BackColor;
             Settings.Default.OutlineColor = outlineColor.BackColor;
-            Settings.Default.OutlineColor = outlineColor.BackColor;
+            var zsDicPath = (txtZsDicPath.Text ?? string.Empty).Trim();
+            var zsDicChanged = !string.Equals(Settings.Default.ZsDicPackPath ?? string.Empty, zsDicPath, StringComparison.OrdinalIgnoreCase);
+            Settings.Default.ZsDicPackPath = zsDicPath;
             Settings.Default.Save();
+            if (zsDicChanged)
+                GameZstd.ReloadFromSettings();
         }
 
         private void pickColor_Click(object sender, EventArgs e)
@@ -94,6 +93,21 @@ namespace BflytPreview
                 Settings.Default.ShowImage = false;
                 showImg.Text = "Show Image";
             }
+        }
+
+        private void btnBrowseZsDic_Click(object sender, EventArgs e)
+        {
+            OpenFileDialog opn = new OpenFileDialog()
+            {
+                Filter = "ZsDic pack (*.zs;*.pack)|*.zs;*.pack|All files|*.*",
+                FileName = string.IsNullOrEmpty(txtZsDicPath.Text) ? "ZsDic.pack.zs" : Path.GetFileName(txtZsDicPath.Text)
+            };
+            if (!string.IsNullOrEmpty(txtZsDicPath.Text))
+            {
+                try { opn.InitialDirectory = Path.GetDirectoryName(txtZsDicPath.Text); } catch { }
+            }
+            if (opn.ShowDialog() != DialogResult.OK) return;
+            txtZsDicPath.Text = opn.FileName;
         }
     }
 }
