@@ -52,6 +52,10 @@ namespace BflytPreview
 		TreeNode TexturesRoot;
 		TreeNode MaterialsRoot;
 
+		// When set, panes whose materials use this palette color are drawn with SelectedColor
+		bool hasPaletteHighlight;
+		RGBAColor paletteHighlightColor;
+
 		public EditorView(BflytFile _layout, IFileWriter saveTo)
 		{
 			KeyPreview = true;
@@ -60,6 +64,7 @@ namespace BflytPreview
 			layout = _layout;
 
 			treeView1.NodeMouseClick += (sender, args) => treeView1.SelectedNode = args.Node;
+			propertyGrid1.SelectedGridItemChanged += propertyGrid1_SelectedGridItemChanged;
 
 			glControl = new OpenTK.GLControl();
 			glControl.Dock = DockStyle.Fill;
@@ -223,6 +228,8 @@ namespace BflytPreview
 						DrawOnTop = p;
 						GL.GetFloat(GetPName.ModelviewMatrix, DrawOnTopTransform);
 					}
+					else if (hasPaletteHighlight && PaneUsesPaletteColor(p, paletteHighlightColor))
+						DrawPane(p.transformedRect, Settings.Default.SelectedColor);
 					else
 						DrawPane(p.transformedRect, color);
 				}
@@ -244,6 +251,24 @@ namespace BflytPreview
                 DrawPane(DrawOnTop.transformedRect, Settings.Default.SelectedColor);
                 DrawPaneMiddlePoint(DrawOnTop.transformedRect, Settings.Default.SelectedColor);
             }
+		}
+
+		bool PaneUsesPaletteColor(Pan1Pane p, RGBAColor color)
+		{
+			if (layout.Mat1?.Materials == null)
+				return false;
+
+			ushort? matIndex = null;
+			if (p is Pic1Pane pic)
+				matIndex = pic.MaterialIndex;
+			else if (p is Txt1Pane txt)
+				matIndex = txt.MaterialIndex;
+
+			if (!matIndex.HasValue || matIndex.Value >= layout.Mat1.Materials.Count)
+				return false;
+
+			var mat = layout.Mat1.Materials[matIndex.Value];
+			return mat.ForegroundColor == color || mat.BackgroundColor == color;
 		}
 
         void DrawPaneMiddlePoint(CusRectangle rect, Color color)
@@ -429,6 +454,11 @@ namespace BflytPreview
 		{
 			if (treeView1.SelectedNode?.Tag is MaterialPaletteTag paletteTag)
 			{
+				if (e.ChangedItem?.Value is RGBAColor edited)
+				{
+					hasPaletteHighlight = true;
+					paletteHighlightColor = edited;
+				}
 				UpdateView(paletteTag);
 				return;
 			}
@@ -438,8 +468,22 @@ namespace BflytPreview
 			glControl.Invalidate();
 		}
 
+		private void propertyGrid1_SelectedGridItemChanged(object sender, SelectedGridItemChangedEventArgs e)
+		{
+			if (propertyGrid1.SelectedObject is MaterialPaletteTag &&
+				e.NewSelection?.Value is RGBAColor color)
+			{
+				hasPaletteHighlight = true;
+				paletteHighlightColor = color;
+				glControl.Invalidate();
+			}
+		}
+
 		private void treeView1_AfterSelect(object sender, TreeViewEventArgs e)
 		{
+			if (!(treeView1.SelectedNode?.Tag is MaterialPaletteTag))
+				hasPaletteHighlight = false;
+
 			propertyGrid1.SelectedObject = treeView1.SelectedNode.Tag;
 			glControl.Invalidate();
 		}
