@@ -178,6 +178,9 @@ publish/
 # in these scripts will be unencrypted
 PublishScripts/
 
+# Local build tooling (nuget.exe downloaded by build.ps1)
+.tools/
+
 # NuGet Packages
 *.nupkg
 # The packages folder can be ignored because of Package Restore

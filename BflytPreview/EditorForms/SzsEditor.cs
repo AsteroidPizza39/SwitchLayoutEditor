@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using SwitchThemes.Common;
+using SwitchThemes.Common.Patching;
 
 namespace BflytPreview.EditorForms
 {
@@ -300,7 +301,7 @@ namespace BflytPreview.EditorForms
 
             if (P.PatchLayouts(JSONLayout))
             {
-                loadedSarc = P.GetFinalSarc();
+                P.FinalizeBntx();
                 MessageBox.Show("Loaded JSON patch");
             }
             else MessageBox.Show("Failed to load the JSON patch.");

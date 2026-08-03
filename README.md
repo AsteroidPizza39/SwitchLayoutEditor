@@ -27,8 +27,16 @@ Example of a custom layout:
 ![](https://github.com/FuryBaguette/SwitchLayoutEditor/blob/master/Screenshots/Example.png)
 
 ## Building
-To build you need the SwitchThemesCommon shared project from [this repo](https://github.com/exelix11/SwitchThemeInjector).
-In case of issues try using a version from commit from the same day as the last commit on this repo.
+From the repo root (PowerShell), run:
+
+```powershell
+.\build.ps1
+.\build.ps1 -Run
+```
+
+The script clones [SwitchThemeInjector](https://github.com/exelix11/SwitchThemeInjector) as a sibling folder if needed, restores NuGet packages, and builds with MSBuild. Useful flags: `-Configuration Debug`, `-SkipRestore`, `-UpdateCommon`.
+
+You can also open `SwitchLayoutEditor.sln` in Visual Studio. You still need the SwitchThemesCommon shared project from that sibling repo. In case of issues try using a version from a commit from the same day as the last commit on this repo.
 
 ## Credits
 - [FuryBaguette](https://github.com/FuryBaguette) - Development
