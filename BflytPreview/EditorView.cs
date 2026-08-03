@@ -867,15 +867,12 @@ namespace BflytPreview
 		/// Vertex colors for GL modulation — same sRGB gamma lift as material black/white in
 		/// <see cref="BntxPreviewCache"/> (cream SideBG etc. otherwise stay too yellow/dark).
 		/// </summary>
-		static Vector4 ToVertexVec4(RGBAColor c, float alphaMul = 1f)
-		{
-			const float invGamma = 1f / 2.2f;
-			return new Vector4(
-				(float)Math.Pow(c.R / 255f, invGamma),
-				(float)Math.Pow(c.G / 255f, invGamma),
-				(float)Math.Pow(c.B / 255f, invGamma),
+		static Vector4 ToVertexVec4(RGBAColor c, float alphaMul = 1f) =>
+			new Vector4(
+				LayoutDisplayColor.LiftChannel(c.R / 255f),
+				LayoutDisplayColor.LiftChannel(c.G / 255f),
+				LayoutDisplayColor.LiftChannel(c.B / 255f),
 				(c.A / 255f) * alphaMul);
-		}
 
 		/// <summary>
 		/// Toolbox stores wrap in the low 2 bits of the flag byte (filter in the upper bits).
@@ -1119,7 +1116,12 @@ namespace BflytPreview
 		{
 			if (treeView1.SelectedNode?.Tag is MaterialPaletteTag paletteTag)
 			{
-				if (e.ChangedItem?.Value is RGBAColor edited)
+				if (e.ChangedItem?.Value is PaletteColorView editedView)
+				{
+					hasPaletteHighlight = true;
+					paletteHighlightColor = editedView.Stored;
+				}
+				else if (e.ChangedItem?.Value is RGBAColor edited)
 				{
 					hasPaletteHighlight = true;
 					paletteHighlightColor = edited;
@@ -1136,6 +1138,13 @@ namespace BflytPreview
 		private void propertyGrid1_SelectedGridItemChanged(object sender, SelectedGridItemChangedEventArgs e)
 		{
 			if (propertyGrid1.SelectedObject is MaterialPaletteTag &&
+				e.NewSelection?.Value is PaletteColorView view)
+			{
+				hasPaletteHighlight = true;
+				paletteHighlightColor = view.Stored;
+				glControl.Invalidate();
+			}
+			else if (propertyGrid1.SelectedObject is MaterialPaletteTag &&
 				e.NewSelection?.Value is RGBAColor color)
 			{
 				hasPaletteHighlight = true;
@@ -1742,10 +1751,13 @@ namespace BflytPreview
 				: base(isVertex ? $"Vertex{index}" : $"Material{index}", new Attribute[]
 				{
 					new CategoryAttribute(isVertex ? "Vertex colors" : "Materials"),
-					new DisplayNameAttribute($"{color}  ({usages})"),
-					new DescriptionAttribute(isVertex
-						? $"Used in {usages} pic1/wnd1/txt1 vertex color slot(s). Changing this updates every matching corner/font color."
-						: $"Used in {usages} material color slot(s). Changing this updates every matching Black/White (Foreground/Background).")
+					new DisplayNameAttribute($"{new PaletteColorView(color)}  ({usages})"),
+					new DescriptionAttribute(
+						"Left swatch / first RGB = file value (what you edit). " +
+						"Right swatch / after → = display preview after gamma (viewport / in-game look). " +
+						(isVertex
+							? $"Used in {usages} pic1/wnd1/txt1 vertex slot(s)."
+							: $"Used in {usages} material Black/White slot(s)."))
 				})
 			{
 				this.index = index;
@@ -1754,20 +1766,31 @@ namespace BflytPreview
 
 			public override Type ComponentType => typeof(MaterialPaletteTag);
 			public override bool IsReadOnly => false;
-			public override Type PropertyType => typeof(RGBAColor);
+			public override Type PropertyType => typeof(PaletteColorView);
 			public override bool CanResetValue(object component) => false;
 			public override void ResetValue(object component) { }
 			public override bool ShouldSerializeValue(object component) => false;
-			public override object GetValue(object component) =>
-				isVertex
+			public override object GetValue(object component)
+			{
+				RGBAColor stored = isVertex
 					? ((MaterialPaletteTag)component).GetVertexColor(index)
 					: ((MaterialPaletteTag)component).GetMaterialColor(index);
+				return new PaletteColorView(stored);
+			}
 			public override void SetValue(object component, object value)
 			{
-				if (isVertex)
-					((MaterialPaletteTag)component).SetVertexColor(index, (RGBAColor)value);
+				RGBAColor stored;
+				if (value is PaletteColorView view)
+					stored = view.Stored;
+				else if (value is RGBAColor rgba)
+					stored = rgba;
 				else
-					((MaterialPaletteTag)component).SetMaterialColor(index, (RGBAColor)value);
+					return;
+
+				if (isVertex)
+					((MaterialPaletteTag)component).SetVertexColor(index, stored);
+				else
+					((MaterialPaletteTag)component).SetMaterialColor(index, stored);
 			}
 		}
 	}

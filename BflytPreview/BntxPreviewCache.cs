@@ -226,15 +226,14 @@ namespace BflytPreview
 		/// </summary>
 		static byte[] BakeShaded(RawTexture raw, Vector4 white, Vector4 black)
 		{
-			const float invGamma = 1f / 2.2f;
-			float wr = (float)Math.Pow(Math.Max(white.X, 0f), invGamma);
-			float wg = (float)Math.Pow(Math.Max(white.Y, 0f), invGamma);
-			float wb = (float)Math.Pow(Math.Max(white.Z, 0f), invGamma);
+			float wr = LayoutDisplayColor.LiftChannel(white.X);
+			float wg = LayoutDisplayColor.LiftChannel(white.Y);
+			float wb = LayoutDisplayColor.LiftChannel(white.Z);
 			float wa = white.W > 0f ? white.W : 1f;
 
-			float br = (float)Math.Pow(Math.Max(black.X, 0f), invGamma);
-			float bg = (float)Math.Pow(Math.Max(black.Y, 0f), invGamma);
-			float bb = (float)Math.Pow(Math.Max(black.Z, 0f), invGamma);
+			float br = LayoutDisplayColor.LiftChannel(black.X);
+			float bg = LayoutDisplayColor.LiftChannel(black.Y);
+			float bb = LayoutDisplayColor.LiftChannel(black.Z);
 
 			byte[] src = raw.Rgba;
 			byte[] dst = new byte[src.Length];
