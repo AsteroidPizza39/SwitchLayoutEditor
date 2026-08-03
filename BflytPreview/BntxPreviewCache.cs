@@ -10,9 +10,10 @@ using SwitchThemes.Common.Bflyt;
 namespace BflytPreview
 {
 	/// <summary>
-	/// BNTX preview cache. Uploads textures with Toolbox-equivalent shading baked in:
-	/// channel swizzle + white/black interpolate (legacy Bflyt.frag), so drawing can stay on
-	/// fixed-function GL (OpenTK GLControl does not reliably run our custom Pic1 shaders).
+	/// BNTX preview cache. Uploads textures with layout shading baked in:
+	/// channel swizzle + white/black interpolate (with sRGB gamma on both colors), so drawing
+	/// can stay on fixed-function GL (OpenTK GLControl does not reliably run our custom Pic1
+	/// shaders).
 	/// </summary>
 	internal sealed class BntxPreviewCache : IDisposable
 	{
@@ -82,7 +83,7 @@ namespace BflytPreview
 		}
 
 		/// <summary>
-		/// Bind a Pic1 texture with channel swizzle + white/black interpolate baked (Toolbox shading).
+		/// Bind a Pic1 texture with channel swizzle + white/black interpolate baked.
 		/// </summary>
 		public bool BindPic1Texture(
 			BflytFile layout,
@@ -104,7 +105,8 @@ namespace BflytPreview
 		}
 
 		/// <summary>
-		/// Bind material texture 0 with Toolbox shading baked in (Pic1 / window frames / content).
+		/// Bind material texture 0 with channel swizzle + white/black interpolate baked
+		/// (Pic1 / window frames / content).
 		/// </summary>
 		public bool BindMaterialTexture(
 			BflytFile layout,
@@ -214,8 +216,11 @@ namespace BflytPreview
 		}
 
 		/// <summary>
-		/// Apply BNTX channel select then Toolbox interpolate: white*tex + black*(1-tex), a=tex.a*white.a
-		/// (with sRGB gamma on white.rgb like legacy Bflyt.frag).
+		/// Apply BNTX channel select then interpolate: rgb = white*tex + black*(1-tex),
+		/// a = tex.a*white.a. Both white and black get the same sRGB gamma lift that legacy
+		/// Bflyt.frag applied only to white — without it, BlackColor HUD fills (hearts etc.)
+		/// stay chocolate-dark vs the muted tan the game shows.
+		///
 		/// Caller must pass WhiteColor/BlackColor in Nintendo order (not SwitchThemesCommon's
 		/// misnamed Foreground/Background — those are Black then White in the file).
 		/// </summary>
@@ -226,6 +231,10 @@ namespace BflytPreview
 			float wg = (float)Math.Pow(Math.Max(white.Y, 0f), invGamma);
 			float wb = (float)Math.Pow(Math.Max(white.Z, 0f), invGamma);
 			float wa = white.W > 0f ? white.W : 1f;
+
+			float br = (float)Math.Pow(Math.Max(black.X, 0f), invGamma);
+			float bg = (float)Math.Pow(Math.Max(black.Y, 0f), invGamma);
+			float bb = (float)Math.Pow(Math.Max(black.Z, 0f), invGamma);
 
 			byte[] src = raw.Rgba;
 			byte[] dst = new byte[src.Length];
@@ -241,10 +250,9 @@ namespace BflytPreview
 				float sb = Select(raw.Blue, r, g, b, a);
 				float sa = Select(raw.Alpha, r, g, b, a);
 
-				// interpolate RGB, then will be modulated by vertex color in GL
-				float or = wr * sr + black.X * (1f - sr);
-				float og = wg * sg + black.Y * (1f - sg);
-				float ob = wb * sb + black.Z * (1f - sb);
+				float or = wr * sr + br * (1f - sr);
+				float og = wg * sg + bg * (1f - sg);
+				float ob = wb * sb + bb * (1f - sb);
 				float oa = sa * wa;
 
 				dst[i] = ToByte(or);

@@ -328,10 +328,10 @@ namespace BflytPreview
 			if (paneAlpha <= 0f)
 				paneAlpha = 1f;
 
-			Vector4 cTL = ToVec4(pic.ColorTopLeft, paneAlpha);
-			Vector4 cTR = ToVec4(pic.ColorTopRight, paneAlpha);
-			Vector4 cBL = ToVec4(pic.ColorBottomLeft, paneAlpha);
-			Vector4 cBR = ToVec4(pic.ColorBottomRight, paneAlpha);
+			Vector4 cTL = ToVertexVec4(pic.ColorTopLeft, paneAlpha);
+			Vector4 cTR = ToVertexVec4(pic.ColorTopRight, paneAlpha);
+			Vector4 cBL = ToVertexVec4(pic.ColorBottomLeft, paneAlpha);
+			Vector4 cBR = ToVertexVec4(pic.ColorBottomRight, paneAlpha);
 			if (cTL.W <= 0f && cTR.W <= 0f && cBL.W <= 0f && cBR.W <= 0f)
 			{
 				cTL.W = cTR.W = cBL.W = cBR.W = paneAlpha;
@@ -411,10 +411,10 @@ namespace BflytPreview
 			if (paneAlpha <= 0f)
 				paneAlpha = 1f;
 
-			Vector4 cTL = ToVec4(wnd.Content.ColorTopLeft, paneAlpha);
-			Vector4 cTR = ToVec4(wnd.Content.ColorTopRight, paneAlpha);
-			Vector4 cBL = ToVec4(wnd.Content.ColorBottomLeft, paneAlpha);
-			Vector4 cBR = ToVec4(wnd.Content.ColorBottomRight, paneAlpha);
+			Vector4 cTL = ToVertexVec4(wnd.Content.ColorTopLeft, paneAlpha);
+			Vector4 cTR = ToVertexVec4(wnd.Content.ColorTopRight, paneAlpha);
+			Vector4 cBL = ToVertexVec4(wnd.Content.ColorBottomLeft, paneAlpha);
+			Vector4 cBR = ToVertexVec4(wnd.Content.ColorBottomRight, paneAlpha);
 			if (cTL.W <= 0f && cTR.W <= 0f && cBL.W <= 0f && cBR.W <= 0f)
 				cTL.W = cTR.W = cBL.W = cBR.W = paneAlpha;
 
@@ -862,6 +862,20 @@ namespace BflytPreview
 
 		static Vector4 ToVec4(RGBAColor c, float alphaMul = 1f) =>
 			new Vector4(c.R / 255f, c.G / 255f, c.B / 255f, (c.A / 255f) * alphaMul);
+
+		/// <summary>
+		/// Vertex colors for GL modulation — same sRGB gamma lift as material black/white in
+		/// <see cref="BntxPreviewCache"/> (cream SideBG etc. otherwise stay too yellow/dark).
+		/// </summary>
+		static Vector4 ToVertexVec4(RGBAColor c, float alphaMul = 1f)
+		{
+			const float invGamma = 1f / 2.2f;
+			return new Vector4(
+				(float)Math.Pow(c.R / 255f, invGamma),
+				(float)Math.Pow(c.G / 255f, invGamma),
+				(float)Math.Pow(c.B / 255f, invGamma),
+				(c.A / 255f) * alphaMul);
+		}
 
 		/// <summary>
 		/// Toolbox stores wrap in the low 2 bits of the flag byte (filter in the upper bits).
