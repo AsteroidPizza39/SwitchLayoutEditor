@@ -282,6 +282,7 @@ namespace BflytPreview
 			if (treeView1.SelectedNode.Tag is BasePane) return treeView1.SelectedNode.Tag;
 			if (treeView1.SelectedNode.Tag is TextureTag) return ((TextureTag)treeView1.SelectedNode.Tag).TexName;
 			if (treeView1.SelectedNode.Tag is BflytMaterial) return treeView1.SelectedNode.Tag;
+			if (treeView1.SelectedNode.Tag is MaterialPaletteTag) return treeView1.SelectedNode.Tag;
 			return null;
 		}
 
@@ -326,6 +327,7 @@ namespace BflytPreview
 				MaterialsRoot = treeView1.Nodes.Add("Materials");
 				int index = 0;
 				if (layout.Mat1 != null)
+				{
 					foreach (var t in layout.Mat1.Materials)
 					{
 						var n = MaterialsRoot.Nodes.Add($"{index++} : {t}");
@@ -333,6 +335,12 @@ namespace BflytPreview
 						if (target != null & t == target)
 							focusElement = n;
 					}
+
+					var paletteNode = MaterialsRoot.Nodes.Add("Palette");
+					paletteNode.Tag = new MaterialPaletteTag(layout.Mat1.Materials);
+					if (focus is MaterialPaletteTag)
+						focusElement = paletteNode;
+				}
 			}
 
 			Pan1Root = null;
@@ -354,7 +362,7 @@ namespace BflytPreview
 			if (focusElement != null)
 			{
 				treeView1.SelectedNode = focusElement;
-				focusElement.Expand();
+				focusElement.EnsureVisible();
 			}
 		}
 
@@ -419,6 +427,12 @@ namespace BflytPreview
 
 		private void propertyGrid1_PropertyValueChanged(object s, PropertyValueChangedEventArgs e)
 		{
+			if (treeView1.SelectedNode?.Tag is MaterialPaletteTag paletteTag)
+			{
+				UpdateView(paletteTag);
+				return;
+			}
+
 			if (e.ChangedItem.Label == "PaneName")
 				UpdateView();
 			glControl.Invalidate();
@@ -812,5 +826,106 @@ namespace BflytPreview
 
 		public static bool operator ==(TextureTag a, TextureTag b) => a.Equals(b);
 		public static bool operator !=(TextureTag a, TextureTag b) => !a.Equals(b);
+	}
+
+	/// <summary>
+	/// Single Palette tree node: exposes every unique material color in one PropertyGrid.
+	/// Editing a color replaces every Foreground/Background match across materials.
+	/// </summary>
+	internal class MaterialPaletteTag : ICustomTypeDescriptor
+	{
+		readonly List<BflytMaterial> materials;
+		readonly List<RGBAColor> colors = new List<RGBAColor>();
+
+		public MaterialPaletteTag(List<BflytMaterial> materials)
+		{
+			this.materials = materials;
+			var seen = new HashSet<RGBAColor>();
+			foreach (var mat in materials)
+			{
+				if (seen.Add(mat.ForegroundColor))
+					colors.Add(mat.ForegroundColor);
+				if (seen.Add(mat.BackgroundColor))
+					colors.Add(mat.BackgroundColor);
+			}
+		}
+
+		internal RGBAColor GetColor(int index) => colors[index];
+
+		internal void SetColor(int index, RGBAColor newColor)
+		{
+			RGBAColor oldColor = colors[index];
+			if (oldColor == newColor) return;
+
+			foreach (var mat in materials)
+			{
+				if (mat.ForegroundColor == oldColor)
+					mat.ForegroundColor = newColor;
+				if (mat.BackgroundColor == oldColor)
+					mat.BackgroundColor = newColor;
+			}
+			colors[index] = newColor;
+		}
+
+		int UsageCount(RGBAColor color)
+		{
+			int count = 0;
+			foreach (var mat in materials)
+			{
+				if (mat.ForegroundColor == color) count++;
+				if (mat.BackgroundColor == color) count++;
+			}
+			return count;
+		}
+
+		public AttributeCollection GetAttributes() => TypeDescriptor.GetAttributes(this, true);
+		public string GetClassName() => nameof(MaterialPaletteTag);
+		public string GetComponentName() => "Palette";
+		public TypeConverter GetConverter() => TypeDescriptor.GetConverter(this, true);
+		public EventDescriptor GetDefaultEvent() => TypeDescriptor.GetDefaultEvent(this, true);
+		public PropertyDescriptor GetDefaultProperty() => null;
+		public object GetEditor(Type editorBaseType) => TypeDescriptor.GetEditor(this, editorBaseType, true);
+		public EventDescriptorCollection GetEvents() => TypeDescriptor.GetEvents(this, true);
+		public EventDescriptorCollection GetEvents(Attribute[] attributes) => TypeDescriptor.GetEvents(this, attributes, true);
+		public PropertyDescriptorCollection GetProperties() => GetProperties(null);
+		public object GetPropertyOwner(PropertyDescriptor pd) => this;
+
+		public PropertyDescriptorCollection GetProperties(Attribute[] attributes)
+		{
+			var props = new PropertyDescriptor[colors.Count];
+			for (int i = 0; i < colors.Count; i++)
+			{
+				var color = colors[i];
+				int usages = UsageCount(color);
+				props[i] = new PaletteColorPropertyDescriptor(i, color, usages);
+			}
+			return new PropertyDescriptorCollection(props);
+		}
+
+		sealed class PaletteColorPropertyDescriptor : PropertyDescriptor
+		{
+			readonly int index;
+
+			public PaletteColorPropertyDescriptor(int index, RGBAColor color, int usages)
+				: base($"Color{index}", new Attribute[]
+				{
+					new CategoryAttribute("Palette"),
+					new DisplayNameAttribute($"{color}  ({usages})"),
+					new DescriptionAttribute($"Used in {usages} material color slot(s). Changing this updates every matching ForegroundColor/BackgroundColor.")
+				})
+			{
+				this.index = index;
+			}
+
+			public override Type ComponentType => typeof(MaterialPaletteTag);
+			public override bool IsReadOnly => false;
+			public override Type PropertyType => typeof(RGBAColor);
+			public override bool CanResetValue(object component) => false;
+			public override void ResetValue(object component) { }
+			public override bool ShouldSerializeValue(object component) => false;
+			public override object GetValue(object component) => ((MaterialPaletteTag)component).GetColor(index);
+			public override void SetValue(object component, object value) =>
+				((MaterialPaletteTag)component).SetColor(index, (RGBAColor)value);
+		}
 	}
 }
