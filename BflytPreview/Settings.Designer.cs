@@ -94,5 +94,17 @@ namespace BflytPreview {
                 this["ZsDicPackPath"] = value;
             }
         }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool PreviewSubLayouts {
+            get {
+                return ((bool)(this["PreviewSubLayouts"]));
+            }
+            set {
+                this["PreviewSubLayouts"] = value;
+            }
+        }
     }
 }

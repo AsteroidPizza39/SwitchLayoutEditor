@@ -22,8 +22,12 @@ namespace BflytPreview
 	public partial class EditorView : Form
 	{
 		BflytFile layout;
+		/// <summary>Layout used for material/texture index lookup (host or active part).</summary>
+		BflytFile activeLayout;
+		PartsLayoutCache partsCache;
 		IFileWriter _saveTo;
 		readonly BntxPreviewCache bntxPreview = new BntxPreviewCache();
+		readonly Dictionary<string, int> textGlTextures = new Dictionary<string, int>();
 		public IFileWriter SaveTo
 		{
 			get => _saveTo;
@@ -58,12 +62,14 @@ namespace BflytPreview
 		bool hasPaletteHighlight;
 		RGBAColor paletteHighlightColor;
 
-		public EditorView(BflytFile _layout, IFileWriter saveTo, byte[] bntxData = null)
+		public EditorView(BflytFile _layout, IFileWriter saveTo, byte[] bntxData = null, PartsLayoutCache parts = null)
 		{
 			KeyPreview = true;
 
 			InitializeComponent();
 			layout = _layout;
+			activeLayout = _layout;
+			partsCache = parts;
 			if (bntxData != null)
 				bntxPreview.Load(bntxData);
 
@@ -238,6 +244,10 @@ namespace BflytPreview
 						DrawPicturePane(pic);
 					else if (p is Wnd1Pane wnd)
 						DrawWindowPane(wnd);
+					else if (p is Txt1Pane txt)
+						DrawTextPane(txt);
+					else if (p is Prt1Pane prt)
+						DrawPartsPane(prt);
 
 					GL.Disable(EnableCap.Texture2D);
 					if (isTreeSelected)
@@ -288,8 +298,8 @@ namespace BflytPreview
 		void DrawPicturePane(Pic1Pane pic)
 		{
 			BflytMaterial mat = null;
-			if (layout.Mat1?.Materials != null && pic.MaterialIndex < layout.Mat1.Materials.Count)
-				mat = layout.Mat1.Materials[pic.MaterialIndex];
+			if (activeLayout.Mat1?.Materials != null && pic.MaterialIndex < activeLayout.Mat1.Materials.Count)
+				mat = activeLayout.Mat1.Materials[pic.MaterialIndex];
 
 			// SwitchThemesCommon names are misleading: BFLYT stores BlackColor then WhiteColor
 			// (same order as Switch Toolbox). ForegroundColor == Black, BackgroundColor == White.
@@ -306,7 +316,7 @@ namespace BflytPreview
 
 			if (mat?.Textures != null && mat.Textures.Length > 0)
 			{
-				hasTexture = bntxPreview.BindPic1Texture(layout, pic, white, black, out texId, out wrapS, out wrapT);
+				hasTexture = bntxPreview.BindPic1Texture(activeLayout, pic, white, black, out texId, out wrapS, out wrapT);
 				if (mat.TextureTransformations != null && mat.TextureTransformations.Length > 0)
 				{
 					var t = mat.TextureTransformations[0];
@@ -426,7 +436,7 @@ namespace BflytPreview
 				// FrameCount 1 and 2: Toolbox (and the game) size strips from frame[0]'s texture
 				// when FrameElement L/R are left at 0 (LoadingFade W_SideBGDeco = 190×1080).
 				if ((wnd.FrameCount == 1 || wnd.FrameCount == 2) &&
-					bntxPreview.TryGetTextureSize(layout, wnd.Frames[0].MaterialIndex, out float oneW, out float oneH))
+					bntxPreview.TryGetTextureSize(activeLayout, wnd.Frames[0].MaterialIndex, out float oneW, out float oneH))
 				{
 					if (frameLeft <= 0f) frameLeft = oneW;
 					if (frameRight <= 0f) frameRight = oneW;
@@ -435,12 +445,12 @@ namespace BflytPreview
 				}
 				else if ((wnd.FrameCount == 4 || wnd.FrameCount == 8) && wnd.Frames.Count >= 4)
 				{
-					if (bntxPreview.TryGetTextureSize(layout, wnd.Frames[0].MaterialIndex, out float fl, out float ft))
+					if (bntxPreview.TryGetTextureSize(activeLayout, wnd.Frames[0].MaterialIndex, out float fl, out float ft))
 					{
 						if (frameLeft <= 0f) frameLeft = fl;
 						if (frameTop <= 0f) frameTop = ft;
 					}
-					if (bntxPreview.TryGetTextureSize(layout, wnd.Frames[3].MaterialIndex, out float fr, out float fb))
+					if (bntxPreview.TryGetTextureSize(activeLayout, wnd.Frames[3].MaterialIndex, out float fr, out float fb))
 					{
 						if (frameRight <= 0f) frameRight = fr;
 						if (frameBottom <= 0f) frameBottom = fb;
@@ -510,7 +520,7 @@ namespace BflytPreview
 				// an opaque fill under the strip — that kills the alpha edge (map/BG must show).
 				float stripW = frameLeft > 0f ? frameLeft : frameRight;
 				if (stripW <= 0f &&
-					bntxPreview.TryGetTextureSize(layout, wnd.Frames[0].MaterialIndex, out float tw, out float th) &&
+					bntxPreview.TryGetTextureSize(activeLayout, wnd.Frames[0].MaterialIndex, out float tw, out float th) &&
 					th > 0f)
 				{
 					stripW = tw * (paneH / th);
@@ -575,6 +585,194 @@ namespace BflytPreview
 			}
 		}
 
+		void DrawPartsPane(Prt1Pane prt)
+		{
+			if (!Settings.Default.PreviewSubLayouts)
+				return;
+			if (partsCache == null || !partsCache.CanPreviewSiblingLayouts)
+				return;
+			if (string.IsNullOrEmpty(prt.PartName))
+				return;
+
+			var partLayout = partsCache.Get(prt.PartName);
+			if (partLayout?.ElementsRoot == null)
+				return;
+
+			float mx = prt.SectionsSacle.X;
+			float my = prt.SectionsSacle.Y;
+			if (Math.Abs(mx) < 1e-6f) mx = 1f;
+			if (Math.Abs(my) < 1e-6f) my = 1f;
+
+			// Pa_Sage_03 → variant 3, etc. Parts hide alternate icons behind anim; pick by instance index.
+			int variantIndex = ParseTrailingIndex(prt.PaneName);
+
+			GL.Scale(mx, my, 1f);
+			var previous = activeLayout;
+			activeLayout = partLayout;
+			try
+			{
+				RenderPaneSubtree(partLayout.ElementsRoot, variantIndex, forceVisible: false);
+			}
+			finally
+			{
+				activeLayout = previous;
+			}
+		}
+
+		static int ParseTrailingIndex(string paneName)
+		{
+			if (string.IsNullOrEmpty(paneName))
+				return 0;
+			int i = paneName.Length - 1;
+			while (i >= 0 && char.IsDigit(paneName[i]))
+				i--;
+			if (i == paneName.Length - 1)
+				return 0;
+			if (int.TryParse(paneName.Substring(i + 1), out int n))
+				return n;
+			return 0;
+		}
+
+		void RenderPaneSubtree(Pan1Pane p, int variantIndex = 0, bool forceVisible = false)
+		{
+			// forceVisible: reveal a normally-hidden part variant (e.g. sage icons).
+			if (!forceVisible && !p.ParentVisibility)
+				return;
+			if (p.Scale.X == 0 || p.Scale.Y == 0)
+				return;
+
+			GL.PushMatrix();
+			GL.Translate(p.Position.X, p.Position.Y, 0);
+			GL.Rotate(p.Rotation.Z, p.Rotation.X, p.Rotation.Y, p.Rotation.Z);
+			GL.Scale(p.Scale.X, p.Scale.Y, 1);
+
+			if (p.ViewInEditor)
+			{
+				if (p is Pic1Pane pic)
+					DrawPicturePane(pic);
+				else if (p is Wnd1Pane wnd)
+					DrawWindowPane(wnd);
+				else if (p is Txt1Pane txt)
+					DrawTextPane(txt);
+				else if (p is Prt1Pane nested)
+					DrawPartsPane(nested);
+			}
+
+			var kids = p.Children.OfType<Pan1Pane>().ToList();
+			// Mutually exclusive variants: one visible at rest, others hidden for anim switching.
+			bool exclusiveVariants = kids.Count > 1
+				&& kids.Count(k => k.Visible) == 1
+				&& kids.Any(k => !k.Visible);
+
+			if (exclusiveVariants)
+			{
+				int idx = Math.Max(0, Math.Min(variantIndex, kids.Count - 1));
+				RenderPaneSubtree(kids[idx], variantIndex, forceVisible: true);
+			}
+			else
+			{
+				foreach (var c in kids)
+					RenderPaneSubtree(c, variantIndex, forceVisible: false);
+			}
+			GL.PopMatrix();
+		}
+
+		void DrawTextPane(Txt1Pane txt)
+		{
+			string text = txt.Text;
+			if (string.IsNullOrEmpty(text))
+				return;
+			text = text.TrimEnd('\0');
+			if (text.Length == 0)
+				return;
+
+			var rect = txt.transformedRect;
+			if (rect.width <= 0 || rect.height <= 0)
+				return;
+
+			float paneAlpha = txt.Alpha / 255f;
+			if (paneAlpha <= 0f)
+				paneAlpha = 1f;
+
+			Color top = Color.FromArgb(
+				Math.Max(1, (int)(txt.FontTopColor.A * paneAlpha)),
+				txt.FontTopColor.R, txt.FontTopColor.G, txt.FontTopColor.B);
+			Color bottom = Color.FromArgb(
+				Math.Max(1, (int)(txt.FontBottomColor.A * paneAlpha)),
+				txt.FontBottomColor.R, txt.FontBottomColor.G, txt.FontBottomColor.B);
+
+			float fontH = Math.Max(8f, txt.FontXYSize.Y > 0 ? txt.FontXYSize.Y : rect.height * 0.75f);
+			string cacheKey = string.Format("{0}|{1}x{2}|{3}|{4}|{5:0.#}",
+				text, rect.width, rect.height, top.ToArgb(), bottom.ToArgb(), fontH);
+
+			if (!textGlTextures.TryGetValue(cacheKey, out int texId))
+			{
+				texId = UploadTextTexture(text, Math.Max(1, rect.width), Math.Max(1, rect.height), fontH, top, bottom, txt);
+				if (texId == 0)
+					return;
+				textGlTextures[cacheKey] = texId;
+			}
+
+			GL.Enable(EnableCap.Texture2D);
+			GL.BindTexture(TextureTarget.Texture2D, texId);
+			GL.Color4(1f, 1f, 1f, paneAlpha);
+			GL.Begin(PrimitiveType.Quads);
+			GL.TexCoord2(0, 0); GL.Vertex2(rect.x, rect.y);
+			GL.TexCoord2(1, 0); GL.Vertex2(rect.x + rect.width, rect.y);
+			GL.TexCoord2(1, 1); GL.Vertex2(rect.x + rect.width, rect.y + rect.height);
+			GL.TexCoord2(0, 1); GL.Vertex2(rect.x, rect.y + rect.height);
+			GL.End();
+			GL.BindTexture(TextureTarget.Texture2D, 0);
+		}
+
+		int UploadTextTexture(string text, int width, int height, float fontH, Color top, Color bottom, Txt1Pane txt)
+		{
+			using (var bmp = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+			using (var g = Graphics.FromImage(bmp))
+			{
+				g.Clear(Color.Transparent);
+				g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+				g.SmoothingMode = SmoothingMode.AntiAlias;
+
+				Color fill = (top.A == bottom.A && top.R == bottom.R && top.G == bottom.G && top.B == bottom.B)
+					? top
+					: Color.FromArgb((top.A + bottom.A) / 2, (top.R + bottom.R) / 2, (top.G + bottom.G) / 2, (top.B + bottom.B) / 2);
+
+				using (var font = new Font("Segoe UI", Math.Max(6f, fontH * 0.75f), FontStyle.Regular, GraphicsUnit.Pixel))
+				using (var brush = new SolidBrush(fill))
+				{
+					var format = new StringFormat();
+					switch (txt.HorizontalAlignment)
+					{
+						case Pan1Pane.OriginX.Left: format.Alignment = StringAlignment.Near; break;
+						case Pan1Pane.OriginX.Right: format.Alignment = StringAlignment.Far; break;
+						default: format.Alignment = StringAlignment.Center; break;
+					}
+					format.LineAlignment = StringAlignment.Center;
+
+					g.DrawString(text, font, brush, new RectangleF(0, 0, width, height), format);
+				}
+
+				var data = bmp.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+				try
+				{
+					GL.GenTextures(1, out int tex);
+					GL.BindTexture(TextureTarget.Texture2D, tex);
+					GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, width, height, 0,
+						OpenTK.Graphics.OpenGL.PixelFormat.Bgra, PixelType.UnsignedByte, data.Scan0);
+					GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+					GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+					GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+					GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+					return tex;
+				}
+				finally
+				{
+					bmp.UnlockBits(data);
+				}
+			}
+		}
+
 		void DrawTexturedQuad(
 			ushort materialIndex,
 			float x, float y, float w, float h,
@@ -585,8 +783,8 @@ namespace BflytPreview
 				return;
 
 			BflytMaterial mat = null;
-			if (layout.Mat1?.Materials != null && materialIndex < layout.Mat1.Materials.Count)
-				mat = layout.Mat1.Materials[materialIndex];
+			if (activeLayout.Mat1?.Materials != null && materialIndex < activeLayout.Mat1.Materials.Count)
+				mat = activeLayout.Mat1.Materials[materialIndex];
 
 			var black = mat != null ? ToVec4(mat.ForegroundColor) : new Vector4(0f, 0f, 0f, 0f);
 			var white = mat != null ? ToVec4(mat.BackgroundColor) : new Vector4(1f, 1f, 1f, 1f);
@@ -600,7 +798,7 @@ namespace BflytPreview
 
 			if (mat?.Textures != null && mat.Textures.Length > 0)
 			{
-				hasTexture = bntxPreview.BindMaterialTexture(layout, materialIndex, white, black, out _, out wrapS, out wrapT);
+				hasTexture = bntxPreview.BindMaterialTexture(activeLayout, materialIndex, white, black, out _, out wrapS, out wrapT);
 				if (mat.TextureTransformations != null && mat.TextureTransformations.Length > 0)
 				{
 					var t = mat.TextureTransformations[0];
@@ -1017,6 +1215,12 @@ namespace BflytPreview
 
 		private void EditorView_FormClosed(object sender, FormClosedEventArgs e)
 		{
+			foreach (var id in textGlTextures.Values)
+			{
+				int tex = id;
+				try { GL.DeleteTextures(1, ref tex); } catch { }
+			}
+			textGlTextures.Clear();
 			bntxPreview.Dispose();
 			SaveTo?.EditorClosed();
 			Settings.Default.ShowImage = false;
@@ -1093,6 +1297,7 @@ namespace BflytPreview
 			SettingsWindow set = new SettingsWindow();
 			set.ShowDialog(this);
 			set.Dispose();
+			glControl?.Invalidate();
 		}
 
 		private void expandAllToolStripMenuItem_Click(object sender, EventArgs e)

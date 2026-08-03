@@ -218,7 +218,7 @@ namespace BflytPreview.EditorForms
             if (Fname.EndsWith(".bflyt", StringComparison.OrdinalIgnoreCase))
                 bntxData = FindPreviewBntx();
 
-            var form = MainForm.OpenFile(loadedSarc.Files[Fname], provider, bntxData);
+            var form = MainForm.OpenFile(loadedSarc.Files[Fname], provider, bntxData, loadedSarc);
             if (form != null)
             {
                 provider.EditorForm = form;

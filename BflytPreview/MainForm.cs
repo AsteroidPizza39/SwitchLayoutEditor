@@ -82,7 +82,7 @@ namespace BflytPreview
 		public Form OpenFileFromDisk(string path) =>
 			OpenFile(File.ReadAllBytes(path), new DiskFileProvider(path));
 
-		public Form OpenFile(byte[] File, IFileWriter saveTo, byte[] bntxData = null)
+		public Form OpenFile(byte[] File, IFileWriter saveTo, byte[] bntxData = null, SarcData partsSarc = null)
 		{
 			if (File == null || File.Length < 4)
 				return null;
@@ -90,12 +90,12 @@ namespace BflytPreview
 			string Magic = Encoding.ASCII.GetString(File, 0, 4);
 			Form result = null;
 			if (Magic == "Yaz0")
-				return OpenFile(ManagedYaz0.Decompress(File), saveTo, bntxData);
+				return OpenFile(ManagedYaz0.Decompress(File), saveTo, bntxData, partsSarc);
 			else if (GameZstd.IsCompressed(File))
 			{
 				try
 				{
-					return OpenFile(GameZstd.Instance.Decompress(File), saveTo, bntxData);
+					return OpenFile(GameZstd.Instance.Decompress(File), saveTo, bntxData, partsSarc);
 				}
 				catch (Exception ex)
 				{
@@ -106,7 +106,12 @@ namespace BflytPreview
 			else if (Magic == "SARC")
 				result = new EditorForms.SzsEditor(SARCExt.SARC.Unpack(File), saveTo, this);
 			else if (Magic == "FLYT")
-				result = new EditorView(new BflytFile(File), saveTo, bntxData);
+			{
+				PartsLayoutCache parts = null;
+				if (partsSarc != null)
+					parts = PartsLayoutCache.FromSarc(partsSarc);
+				result = new EditorView(new BflytFile(File), saveTo, bntxData, parts);
+			}
 			else if (Magic == "FLAN")
 				result = new BflanEditor(new BflanFile(File), saveTo);
 			
