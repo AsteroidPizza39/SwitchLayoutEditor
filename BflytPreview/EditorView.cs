@@ -1246,18 +1246,26 @@ namespace BflytPreview
 
 		private void SetupCursorXYZ(Point res)
 		{
-			x -= res.X;
-			y += res.Y;
+			// Screen-pixel drag → layout units (Scale is applied after Translate).
+			float z = (float)zoomFactor;
+			if (z < 1e-6f) z = 1e-6f;
+			x -= res.X / z;
+			y += res.Y / z;
 		}
 
 		private void SetupObjectXYZ(Pan1Pane p, Point res)
 		{
-			p.Position = new SwitchThemes.Common.Vector3(p.Position.X - res.X, p.Position.Y + res.Y, 0);
+			float z = (float)zoomFactor;
+			if (z < 1e-6f) z = 1e-6f;
+			p.Position = new SwitchThemes.Common.Vector3(
+				p.Position.X - res.X / z,
+				p.Position.Y + res.Y / z,
+				0);
 		}
 
 		private void glControl_MouseDown(object sender, MouseEventArgs e)
 		{
-			if (e.Button != MouseButtons.Left)
+			if (e.Button != MouseButtons.Left && e.Button != MouseButtons.Middle)
 				return;
 
 			firstPoint = Control.MousePosition;
@@ -1267,7 +1275,7 @@ namespace BflytPreview
 		{
 			MessageBox.Show(
                 "Quick guide:\n\n" +
-				"- Moving the view: to move the view just click anywhere in the canvas and drag the canvas\n\n" +
+				"- Moving the view: left-drag or middle-drag on the canvas\n\n" +
                 "- Zoom: scroll the mouse wheel over the preview (or use the trackbar on the bottom left)\n\n" +
                 "- Dragging objects: First select an object in the tree view, it will be highlighted in the preview, then keeping CTRL pressed drag it with the cursor in the canvas\n\n" +
 				"- The green box: The green box represents the screen bounds, it's always at (0,0) and has the screen size.");
@@ -1301,33 +1309,34 @@ namespace BflytPreview
 		bool DraggedObject = false;
 		private void glControl_MouseMove(object sender, MouseEventArgs e)
 		{
-			if (e.Button != MouseButtons.Left || !canMoveView)
+			if (!canMoveView)
 				return;
+
+			bool middlePan = e.Button == MouseButtons.Middle;
+			bool left = e.Button == MouseButtons.Left;
+			if (!middlePan && !left)
+				return;
+
+			Point temp = Control.MousePosition;
+			Point res = new Point(firstPoint.X - temp.X, firstPoint.Y - temp.Y);
+
 			Pan1Pane target = null;
 			if (treeView1.SelectedNode != null)
 				target = treeView1.SelectedNode.Tag as Pan1Pane;
 
-			if (ModifierKeys.HasFlag(Keys.Control) && target != null)
+			if (left && !middlePan && ModifierKeys.HasFlag(Keys.Control) && target != null)
 			{
-				Point temp = Control.MousePosition;
-				Point res = new Point(firstPoint.X - temp.X, firstPoint.Y - temp.Y);
-
 				SetupObjectXYZ(target, res);
-
-				firstPoint = temp;
 				DraggedObject = true;
-				glControl.Invalidate();
 			}
-			else if (!ModifierKeys.HasFlag(Keys.Control))
+			else
 			{
-				Point temp = Control.MousePosition;
-				Point res = new Point(firstPoint.X - temp.X, firstPoint.Y - temp.Y);
-
+				// Left-drag (without Ctrl) or middle-drag pans the view.
 				SetupCursorXYZ(res);
-
-				firstPoint = temp;
-				glControl.Invalidate();
 			}
+
+			firstPoint = temp;
+			glControl.Invalidate();
 		}
 
 		public static int LoadBgImage(string path, bool flip_x = false, bool flip_y = false)
