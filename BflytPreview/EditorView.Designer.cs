@@ -36,6 +36,7 @@
 			this.saveToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.viewToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.paletteToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+			this.showPaneFramesToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.expandAllToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.collapseAllToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.addCheckedToFilterToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -128,6 +129,7 @@
 			// 
 			this.viewToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.paletteToolStripMenuItem,
+            this.showPaneFramesToolStripMenuItem,
             this.expandAllToolStripMenuItem,
             this.collapseAllToolStripMenuItem});
 			this.viewToolStripMenuItem.Name = "viewToolStripMenuItem";
@@ -138,16 +140,27 @@
 			// 
 			this.paletteToolStripMenuItem.Name = "paletteToolStripMenuItem";
 			this.paletteToolStripMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.P)));
-			this.paletteToolStripMenuItem.Size = new System.Drawing.Size(177, 22);
+			this.paletteToolStripMenuItem.Size = new System.Drawing.Size(200, 22);
 			this.paletteToolStripMenuItem.Text = "Palette";
 			this.paletteToolStripMenuItem.ToolTipText = "Open the color palette window";
 			this.paletteToolStripMenuItem.Click += new System.EventHandler(this.paletteToolStripMenuItem_Click);
+			// 
+			// showPaneFramesToolStripMenuItem
+			// 
+			this.showPaneFramesToolStripMenuItem.Checked = true;
+			this.showPaneFramesToolStripMenuItem.CheckOnClick = true;
+			this.showPaneFramesToolStripMenuItem.Name = "showPaneFramesToolStripMenuItem";
+			this.showPaneFramesToolStripMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.H)));
+			this.showPaneFramesToolStripMenuItem.Size = new System.Drawing.Size(200, 22);
+			this.showPaneFramesToolStripMenuItem.Text = "Show pane frames";
+			this.showPaneFramesToolStripMenuItem.ToolTipText = "Toggle pane bounding-box outlines in the preview";
+			this.showPaneFramesToolStripMenuItem.Click += new System.EventHandler(this.showPaneFramesToolStripMenuItem_Click);
 			// 
 			// expandAllToolStripMenuItem
 			// 
 			this.expandAllToolStripMenuItem.Name = "expandAllToolStripMenuItem";
 			this.expandAllToolStripMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.L)));
-			this.expandAllToolStripMenuItem.Size = new System.Drawing.Size(177, 22);
+			this.expandAllToolStripMenuItem.Size = new System.Drawing.Size(200, 22);
 			this.expandAllToolStripMenuItem.Text = "Expand All";
 			this.expandAllToolStripMenuItem.ToolTipText = "Expand all nodes in the tree view";
 			this.expandAllToolStripMenuItem.Click += new System.EventHandler(this.expandAllToolStripMenuItem_Click);
@@ -156,7 +169,7 @@
 			// 
 			this.collapseAllToolStripMenuItem.Name = "collapseAllToolStripMenuItem";
 			this.collapseAllToolStripMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.K)));
-			this.collapseAllToolStripMenuItem.Size = new System.Drawing.Size(177, 22);
+			this.collapseAllToolStripMenuItem.Size = new System.Drawing.Size(200, 22);
 			this.collapseAllToolStripMenuItem.Text = "Collapse All";
 			this.collapseAllToolStripMenuItem.ToolTipText = "Collapse all nodes in the tree view";
 			this.collapseAllToolStripMenuItem.Click += new System.EventHandler(this.collapseAllToolStripMenuItem_Click);
@@ -486,6 +499,7 @@
         private System.Windows.Forms.ToolStripMenuItem settingsToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem viewToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem paletteToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem showPaneFramesToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem expandAllToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem collapseAllToolStripMenuItem;
         private System.Windows.Forms.ContextMenuStrip PaneMenuStrip;

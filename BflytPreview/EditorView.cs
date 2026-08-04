@@ -257,17 +257,26 @@ namespace BflytPreview
 						DrawPartsPane(prt);
 
 					GL.Disable(EnableCap.Texture2D);
-					if (isTreeSelected)
+					if (showPaneFramesToolStripMenuItem.Checked)
 					{
-						DrawOnTop = p;
-						GL.GetFloat(GetPName.ModelviewMatrix, DrawOnTopTransform);
+						if (isTreeSelected)
+						{
+							DrawOnTop = p;
+							GL.GetFloat(GetPName.ModelviewMatrix, DrawOnTopTransform);
+						}
+						else if (isPaletteHit)
+							DrawPane(p.transformedRect, Settings.Default.SelectedColor);
+						else if (isFilterRoot)
+							DrawPane(p.transformedRect, FilterRootOutlineColor);
+						else
+							DrawPane(p.transformedRect, color);
 					}
-					else if (isPaletteHit)
-						DrawPane(p.transformedRect, Settings.Default.SelectedColor);
-					else if (isFilterRoot)
-						DrawPane(p.transformedRect, FilterRootOutlineColor);
-					else
-						DrawPane(p.transformedRect, color);
+					else if (isTreeSelected)
+					{
+						// Keep selection tracking so property edits still target the pane,
+						// but skip drawing the frame for a clean game preview.
+						DrawOnTop = null;
+					}
 					GL.Enable(EnableCap.Texture2D);
 				}
 
@@ -280,6 +289,7 @@ namespace BflytPreview
 			GL.Translate(x, y, 0);
 
 			RecursiveRenderPane(layout.ElementsRoot);
+			if (showPaneFramesToolStripMenuItem.Checked)
 			{
 				var root = layout.ElementsRoot;
 				int rw = Math.Max(1, (int)root.Size.X);
@@ -287,7 +297,7 @@ namespace BflytPreview
 				DrawPane(new CusRectangle(-rw / 2, -rh / 2, rw, rh), Settings.Default.OutlineColor);
 			}
 
-			if (DrawOnTop != null)
+			if (DrawOnTop != null && showPaneFramesToolStripMenuItem.Checked)
 			{
 				GL.LoadMatrix(DrawOnTopTransform);
                 DrawPane(DrawOnTop.transformedRect, Settings.Default.SelectedColor);
@@ -1348,6 +1358,11 @@ namespace BflytPreview
 		private void paletteToolStripMenuItem_Click(object sender, EventArgs e)
 		{
 			ShowPaletteWindow();
+		}
+
+		private void showPaneFramesToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			glControl?.Invalidate();
 		}
 
 		private void addCheckedToFilterToolStripMenuItem_Click(object sender, EventArgs e)
