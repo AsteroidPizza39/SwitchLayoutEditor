@@ -234,7 +234,7 @@
     </Compile>
     <Compile Include="BntxPreviewCache.cs" />
     <Compile Include="LayoutDisplayColor.cs" />
-    <Compile Include="PaletteColorView.cs" />
+    <Compile Include="PaletteSheet.cs" />
     <Compile Include="PartsLayoutCache.cs" />
     <Compile Include="BntxTextureDecoder.cs" />
     <Compile Include="Compression\GameZstd.cs" />

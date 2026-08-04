@@ -61,6 +61,7 @@ namespace BflytPreview
 		// When set, panes whose materials use this palette color are drawn with SelectedColor
 		bool hasPaletteHighlight;
 		RGBAColor paletteHighlightColor;
+		readonly PaletteSheet paletteSheet;
 
 		public EditorView(BflytFile _layout, IFileWriter saveTo, byte[] bntxData = null, PartsLayoutCache parts = null)
 		{
@@ -74,7 +75,29 @@ namespace BflytPreview
 				bntxPreview.Load(bntxData);
 
 			treeView1.NodeMouseClick += (sender, args) => treeView1.SelectedNode = args.Node;
-			propertyGrid1.SelectedGridItemChanged += propertyGrid1_SelectedGridItemChanged;
+
+			paletteSheet = new PaletteSheet
+			{
+				Visible = false,
+				Anchor = propertyGrid1.Anchor,
+				Location = propertyGrid1.Location,
+				Size = propertyGrid1.Size,
+				TabIndex = propertyGrid1.TabIndex
+			};
+			paletteSheet.HighlightColorChanged += color =>
+			{
+				hasPaletteHighlight = true;
+				paletteHighlightColor = color;
+				glControl?.Invalidate();
+			};
+			paletteSheet.PaletteChanged += () =>
+			{
+				// Keep the Palette node selected; refresh viewport (texture bake uses new colors).
+				bntxPreview.InvalidateShaded();
+				glControl?.Invalidate();
+			};
+			splitContainer2.Panel2.Controls.Add(paletteSheet);
+			zoomSlider.BringToFront();
 
 			glControl = new OpenTK.GLControl();
 			glControl.Dock = DockStyle.Fill;
@@ -1114,51 +1137,35 @@ namespace BflytPreview
 
 		private void propertyGrid1_PropertyValueChanged(object s, PropertyValueChangedEventArgs e)
 		{
-			if (treeView1.SelectedNode?.Tag is MaterialPaletteTag paletteTag)
-			{
-				if (e.ChangedItem?.Value is PaletteColorView editedView)
-				{
-					hasPaletteHighlight = true;
-					paletteHighlightColor = editedView.Stored;
-				}
-				else if (e.ChangedItem?.Value is RGBAColor edited)
-				{
-					hasPaletteHighlight = true;
-					paletteHighlightColor = edited;
-				}
-				UpdateView(paletteTag);
-				return;
-			}
-
 			if (e.ChangedItem.Label == "PaneName")
 				UpdateView();
 			glControl.Invalidate();
 		}
 
-		private void propertyGrid1_SelectedGridItemChanged(object sender, SelectedGridItemChangedEventArgs e)
-		{
-			if (propertyGrid1.SelectedObject is MaterialPaletteTag &&
-				e.NewSelection?.Value is PaletteColorView view)
-			{
-				hasPaletteHighlight = true;
-				paletteHighlightColor = view.Stored;
-				glControl.Invalidate();
-			}
-			else if (propertyGrid1.SelectedObject is MaterialPaletteTag &&
-				e.NewSelection?.Value is RGBAColor color)
-			{
-				hasPaletteHighlight = true;
-				paletteHighlightColor = color;
-				glControl.Invalidate();
-			}
-		}
-
 		private void treeView1_AfterSelect(object sender, TreeViewEventArgs e)
 		{
-			if (!(treeView1.SelectedNode?.Tag is MaterialPaletteTag))
+			if (treeView1.SelectedNode?.Tag is MaterialPaletteTag paletteTag)
+			{
+				propertyGrid1.Visible = false;
+				propertyGrid1.SelectedObject = null;
+				paletteSheet.Visible = true;
+				paletteSheet.Bind(paletteTag);
+				zoomSlider.BringToFront();
+				if (paletteSheet.Rows.Count > 0 &&
+				    paletteSheet.Rows[0].Tag is MaterialPaletteTag.PaletteRow first)
+				{
+					hasPaletteHighlight = true;
+					paletteHighlightColor = first.Color;
+				}
+			}
+			else
+			{
 				hasPaletteHighlight = false;
-
-			propertyGrid1.SelectedObject = treeView1.SelectedNode.Tag;
+				paletteSheet.Visible = false;
+				paletteSheet.ClearPalette();
+				propertyGrid1.Visible = true;
+				propertyGrid1.SelectedObject = treeView1.SelectedNode?.Tag;
+			}
 			glControl.Invalidate();
 		}
 
@@ -1558,12 +1565,23 @@ namespace BflytPreview
 	/// Palette tree node: unique material Black/White colors and pane/window/text vertex colors.
 	/// Editing a color replaces every matching slot of that kind across the layout.
 	/// </summary>
-	internal class MaterialPaletteTag : ICustomTypeDescriptor
+	internal class MaterialPaletteTag
 	{
+		public struct PaletteRow
+		{
+			public int Index;
+			public bool IsVertex;
+			public RGBAColor Color;
+			public int Usages;
+		}
+
 		readonly BflytFile layout;
 		readonly List<BflytMaterial> materials;
 		readonly List<RGBAColor> materialColors = new List<RGBAColor>();
 		readonly List<RGBAColor> vertexColors = new List<RGBAColor>();
+
+		public int MaterialCount => materialColors.Count;
+		public int VertexCount => vertexColors.Count;
 
 		public MaterialPaletteTag(BflytFile layout)
 		{
@@ -1615,10 +1633,43 @@ namespace BflytPreview
 			}
 		}
 
-		internal RGBAColor GetMaterialColor(int index) => materialColors[index];
-		internal RGBAColor GetVertexColor(int index) => vertexColors[index];
+		public List<PaletteRow> GetRows()
+		{
+			var rows = new List<PaletteRow>(materialColors.Count + vertexColors.Count);
+			for (int i = 0; i < materialColors.Count; i++)
+			{
+				var c = materialColors[i];
+				rows.Add(new PaletteRow
+				{
+					Index = i,
+					IsVertex = false,
+					Color = c,
+					Usages = MaterialUsageCount(c)
+				});
+			}
+			for (int i = 0; i < vertexColors.Count; i++)
+			{
+				var c = vertexColors[i];
+				rows.Add(new PaletteRow
+				{
+					Index = i,
+					IsVertex = true,
+					Color = c,
+					Usages = VertexUsageCount(c)
+				});
+			}
+			return rows;
+		}
 
-		internal void SetMaterialColor(int index, RGBAColor newColor)
+		public void SetColor(int index, bool isVertex, RGBAColor newColor)
+		{
+			if (isVertex)
+				SetVertexColor(index, newColor);
+			else
+				SetMaterialColor(index, newColor);
+		}
+
+		void SetMaterialColor(int index, RGBAColor newColor)
 		{
 			RGBAColor oldColor = materialColors[index];
 			if (oldColor == newColor) return;
@@ -1633,7 +1684,7 @@ namespace BflytPreview
 			materialColors[index] = newColor;
 		}
 
-		internal void SetVertexColor(int index, RGBAColor newColor)
+		void SetVertexColor(int index, RGBAColor newColor)
 		{
 			RGBAColor oldColor = vertexColors[index];
 			if (oldColor == newColor) return;
@@ -1709,89 +1760,6 @@ namespace BflytPreview
 				}
 			}
 			return count;
-		}
-
-		public AttributeCollection GetAttributes() => TypeDescriptor.GetAttributes(this, true);
-		public string GetClassName() => nameof(MaterialPaletteTag);
-		public string GetComponentName() => "Palette";
-		public TypeConverter GetConverter() => TypeDescriptor.GetConverter(this, true);
-		public EventDescriptor GetDefaultEvent() => TypeDescriptor.GetDefaultEvent(this, true);
-		public PropertyDescriptor GetDefaultProperty() => null;
-		public object GetEditor(Type editorBaseType) => TypeDescriptor.GetEditor(this, editorBaseType, true);
-		public EventDescriptorCollection GetEvents() => TypeDescriptor.GetEvents(this, true);
-		public EventDescriptorCollection GetEvents(Attribute[] attributes) => TypeDescriptor.GetEvents(this, attributes, true);
-		public PropertyDescriptorCollection GetProperties() => GetProperties(null);
-		public object GetPropertyOwner(PropertyDescriptor pd) => this;
-
-		public PropertyDescriptorCollection GetProperties(Attribute[] attributes)
-		{
-			var props = new PropertyDescriptor[materialColors.Count + vertexColors.Count];
-			int i = 0;
-			for (int m = 0; m < materialColors.Count; m++, i++)
-			{
-				var color = materialColors[m];
-				props[i] = new PaletteColorPropertyDescriptor(
-					m, color, MaterialUsageCount(color), isVertex: false);
-			}
-			for (int v = 0; v < vertexColors.Count; v++, i++)
-			{
-				var color = vertexColors[v];
-				props[i] = new PaletteColorPropertyDescriptor(
-					v, color, VertexUsageCount(color), isVertex: true);
-			}
-			return new PropertyDescriptorCollection(props);
-		}
-
-		sealed class PaletteColorPropertyDescriptor : PropertyDescriptor
-		{
-			readonly int index;
-			readonly bool isVertex;
-
-			public PaletteColorPropertyDescriptor(int index, RGBAColor color, int usages, bool isVertex)
-				: base(isVertex ? $"Vertex{index}" : $"Material{index}", new Attribute[]
-				{
-					new CategoryAttribute(isVertex ? "Vertex colors" : "Materials"),
-					new DisplayNameAttribute($"{new PaletteColorView(color)}  ({usages})"),
-					new DescriptionAttribute(
-						"Left swatch / first RGB = file value (what you edit). " +
-						"Right swatch / after → = display preview after gamma (viewport / in-game look). " +
-						(isVertex
-							? $"Used in {usages} pic1/wnd1/txt1 vertex slot(s)."
-							: $"Used in {usages} material Black/White slot(s)."))
-				})
-			{
-				this.index = index;
-				this.isVertex = isVertex;
-			}
-
-			public override Type ComponentType => typeof(MaterialPaletteTag);
-			public override bool IsReadOnly => false;
-			public override Type PropertyType => typeof(PaletteColorView);
-			public override bool CanResetValue(object component) => false;
-			public override void ResetValue(object component) { }
-			public override bool ShouldSerializeValue(object component) => false;
-			public override object GetValue(object component)
-			{
-				RGBAColor stored = isVertex
-					? ((MaterialPaletteTag)component).GetVertexColor(index)
-					: ((MaterialPaletteTag)component).GetMaterialColor(index);
-				return new PaletteColorView(stored);
-			}
-			public override void SetValue(object component, object value)
-			{
-				RGBAColor stored;
-				if (value is PaletteColorView view)
-					stored = view.Stored;
-				else if (value is RGBAColor rgba)
-					stored = rgba;
-				else
-					return;
-
-				if (isVertex)
-					((MaterialPaletteTag)component).SetVertexColor(index, stored);
-				else
-					((MaterialPaletteTag)component).SetMaterialColor(index, stored);
-			}
 		}
 	}
 }

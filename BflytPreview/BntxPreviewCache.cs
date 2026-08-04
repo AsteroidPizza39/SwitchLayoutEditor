@@ -321,6 +321,8 @@ namespace BflytPreview
 			return tex;
 		}
 
+		public void InvalidateShaded() => DisposeGlTextures();
+
 		void DisposeGlTextures()
 		{
 			foreach (var id in shadedGl.Values)
