@@ -96,6 +96,8 @@ namespace BflytPreview
 		internal PaneColorFilter PaneFilter { get; } = new PaneColorFilter();
 		readonly LayoutUndoStack undoStack = new LayoutUndoStack();
 		byte[] propertyGridBaseline;
+		TreeNode checkRangeAnchor;
+		bool suppressTreeCheckEvents;
 
 		public EditorView(BflytFile _layout, IFileWriter saveTo, byte[] bntxData = null, PartsLayoutCache parts = null)
 		{
@@ -1205,6 +1207,86 @@ namespace BflytPreview
 				e.Cancel = true;
 		}
 
+		private void treeView1_AfterCheck(object sender, TreeViewEventArgs e)
+		{
+			if (suppressTreeCheckEvents || !(e.Node.Tag is BasePane))
+				return;
+
+			bool check = e.Node.Checked;
+			suppressTreeCheckEvents = true;
+			try
+			{
+				if (ModifierKeys.HasFlag(Keys.Shift) &&
+				    checkRangeAnchor != null &&
+				    checkRangeAnchor.TreeView == treeView1 &&
+				    checkRangeAnchor.Tag is BasePane)
+				{
+					foreach (TreeNode n in GetVisiblePaneNodesInRange(checkRangeAnchor, e.Node))
+					{
+						n.Checked = check;
+						SetDescendantPaneChecks(n, check);
+					}
+				}
+				else
+				{
+					SetDescendantPaneChecks(e.Node, check);
+					checkRangeAnchor = e.Node;
+				}
+			}
+			finally
+			{
+				suppressTreeCheckEvents = false;
+			}
+		}
+
+		/// <summary>
+		/// Visible BasePane nodes from <paramref name="a"/> through <paramref name="b"/> in tree display order.
+		/// </summary>
+		List<TreeNode> GetVisiblePaneNodesInRange(TreeNode a, TreeNode b)
+		{
+			var visible = new List<TreeNode>();
+			CollectVisiblePaneNodes(treeView1.Nodes, visible);
+			int i0 = visible.IndexOf(a);
+			int i1 = visible.IndexOf(b);
+			if (i0 < 0) i0 = i1;
+			if (i1 < 0) i1 = i0;
+			if (i0 < 0 || i1 < 0)
+				return new List<TreeNode> { b };
+
+			if (i0 > i1)
+			{
+				int tmp = i0;
+				i0 = i1;
+				i1 = tmp;
+			}
+
+			var range = new List<TreeNode>(i1 - i0 + 1);
+			for (int i = i0; i <= i1; i++)
+				range.Add(visible[i]);
+			return range;
+		}
+
+		static void CollectVisiblePaneNodes(TreeNodeCollection nodes, List<TreeNode> list)
+		{
+			foreach (TreeNode n in nodes)
+			{
+				if (n.Tag is BasePane)
+					list.Add(n);
+				if (n.IsExpanded)
+					CollectVisiblePaneNodes(n.Nodes, list);
+			}
+		}
+
+		static void SetDescendantPaneChecks(TreeNode node, bool check)
+		{
+			foreach (TreeNode child in node.Nodes)
+			{
+				if (child.Tag is BasePane)
+					child.Checked = check;
+				SetDescendantPaneChecks(child, check);
+			}
+		}
+
 		private void treeView1_KeyDown(object sender, KeyEventArgs e)
 		{
 			if (e.KeyCode == Keys.H)
@@ -1635,7 +1717,16 @@ namespace BflytPreview
 		public void ClearPaneFilter()
 		{
 			PaneFilter.Clear();
-			UncheckAllTreeNodes(treeView1.Nodes);
+			suppressTreeCheckEvents = true;
+			try
+			{
+				UncheckAllTreeNodes(treeView1.Nodes);
+			}
+			finally
+			{
+				suppressTreeCheckEvents = false;
+			}
+			checkRangeAnchor = null;
 			OnPaneFilterChanged();
 			paletteWindow?.RefreshStatus();
 		}
@@ -1659,10 +1750,18 @@ namespace BflytPreview
 
 		void SyncFilterChecksToTree()
 		{
-			UncheckAllTreeNodes(treeView1.Nodes);
-			if (!PaneFilter.IsActive)
-				return;
-			CheckFilterRoots(treeView1.Nodes);
+			suppressTreeCheckEvents = true;
+			try
+			{
+				UncheckAllTreeNodes(treeView1.Nodes);
+				if (!PaneFilter.IsActive)
+					return;
+				CheckFilterRoots(treeView1.Nodes);
+			}
+			finally
+			{
+				suppressTreeCheckEvents = false;
+			}
 		}
 
 		void CheckFilterRoots(TreeNodeCollection nodes)

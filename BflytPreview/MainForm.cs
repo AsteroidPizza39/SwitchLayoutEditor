@@ -189,34 +189,32 @@ namespace BflytPreview
 
 		private void createSzsFromFolderToolStripMenuItem_Click(object sender, EventArgs e)
 		{
-			using var folderBrowser = new FolderBrowserDialog();
-			if (folderBrowser.ShowDialog() == DialogResult.OK)
+			if (!ModernFolderBrowser.TryPickFolder(this, out string root, "Select folder to pack…"))
+				return;
+
+			using var saveFileDialog = new SaveFileDialog
 			{
-				using var saveFileDialog = new SaveFileDialog
-				{
-					Filter = "szs files|*.szs",
-					FileName = "new.szs"
-				};
+				Filter = "szs files|*.szs",
+				FileName = "new.szs"
+			};
 
-				if (saveFileDialog.ShowDialog() != DialogResult.OK)
-					return;
+			if (saveFileDialog.ShowDialog() != DialogResult.OK)
+				return;
 
-				var root = folderBrowser.SelectedPath;
-				var files = Directory.GetFiles(folderBrowser.SelectedPath, "*", SearchOption.AllDirectories)
-					.Select(x => x.Remove(0, root.Length + 1))
-					.ToArray();
+			var files = Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+				.Select(x => x.Remove(0, root.Length + 1))
+				.ToArray();
 
-				var szs = new SARCExt.SarcData();
-				foreach (var file in files)
-				{
-					var name = file.Replace('\\', '/');
-					var data = File.ReadAllBytes(Path.Combine(root, file));
-					szs.Files.Add(name, data);
-                }
+			var szs = new SARCExt.SarcData();
+			foreach (var file in files)
+			{
+				var name = file.Replace('\\', '/');
+				var data = File.ReadAllBytes(Path.Combine(root, file));
+				szs.Files.Add(name, data);
+			}
 
-                var s = SARC.Pack(szs);
-                File.WriteAllBytes(saveFileDialog.FileName, ManagedYaz0.Compress(s.Item2, 3, s.Item1));
-            }
+			var s = SARC.Pack(szs);
+			File.WriteAllBytes(saveFileDialog.FileName, ManagedYaz0.Compress(s.Item2, 3, s.Item1));
 		}
     }
 

@@ -145,20 +145,19 @@ namespace BflytPreview.EditorForms
             ExtractMultipleFiles(loadedSarc.Files.Keys.ToArray());
         }
 
-        void ExtractMultipleFiles(IEnumerable<string> files)
-        {
-            var dlg = new FolderBrowserDialog();
-            if (dlg.ShowDialog() != DialogResult.OK)
-                return;
-            foreach (string f in files)
-            {
-                string fOut = Path.Combine(dlg.SelectedPath, f);
-                DirectoryInfo dir = new DirectoryInfo(Path.GetDirectoryName(fOut));
-                if (!dir.Exists)
-                    dir.Create();
-                File.WriteAllBytes(fOut, loadedSarc.Files[f]);
-            }
-        }
+		void ExtractMultipleFiles(IEnumerable<string> files)
+		{
+			if (!ModernFolderBrowser.TryPickFolder(this, out string folder, "Extract files to…"))
+				return;
+			foreach (string f in files)
+			{
+				string fOut = Path.Combine(folder, f);
+				DirectoryInfo dir = new DirectoryInfo(Path.GetDirectoryName(fOut));
+				if (!dir.Exists)
+					dir.Create();
+				File.WriteAllBytes(fOut, loadedSarc.Files[f]);
+			}
+		}
 
         private void extractToolStripMenuItem_Click(object sender, EventArgs e)
         {
