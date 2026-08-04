@@ -51,6 +51,34 @@ namespace BflytPreview
 
 		public static int texture;
 
+		enum CanvasDragMode
+		{
+			None,
+			Marquee,
+			Pan,
+			MoveObject
+		}
+
+		CanvasDragMode canvasDragMode;
+		Point marqueeStartClient;
+		Point marqueeEndClient;
+		readonly HashSet<Pan1Pane> marqueePreviewHits = new HashSet<Pan1Pane>();
+		readonly Dictionary<Pan1Pane, PaneScreenQuad> paneScreenBounds = new Dictionary<Pan1Pane, PaneScreenQuad>();
+
+		struct PaneScreenQuad
+		{
+			public float X0, Y0, X1, Y1, X2, Y2, X3, Y3;
+
+			public bool FullyInside(int selX0, int selY0, int selX1, int selY1) =>
+				CornerInside(X0, Y0, selX0, selY0, selX1, selY1) &&
+				CornerInside(X1, Y1, selX0, selY0, selX1, selY1) &&
+				CornerInside(X2, Y2, selX0, selY0, selX1, selY1) &&
+				CornerInside(X3, Y3, selX0, selY0, selX1, selY1);
+
+			static bool CornerInside(float x, float y, int x0, int y0, int x1, int y1) =>
+				x >= x0 && x <= x1 && y >= y0 && y <= y1;
+		}
+
 		// This represents the whole file while the other treeview roots represent the logical hierarchy
 		TreeNode AllPanesRoot;
 		TreeNode Pan1Root;
@@ -183,6 +211,7 @@ namespace BflytPreview
 				DrawBgImage();
 
 			RenderPanes();
+			DrawMarqueeOverlay();
 
 			glControl.SwapBuffers();
 		}
@@ -226,6 +255,7 @@ namespace BflytPreview
 		{
 			float[] DrawOnTopTransform = new float[16];
 			Pan1Pane DrawOnTop = null;
+			paneScreenBounds.Clear();
 
 			GL.Enable(EnableCap.Blend);
 			GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
@@ -245,9 +275,12 @@ namespace BflytPreview
 
 				if (p.ViewInEditor)
 				{
+					CachePaneScreenBounds(p);
+
 					bool isTreeSelected = treeView1.SelectedNode != null && (p == treeView1.SelectedNode.Tag as Pan1Pane);
 					bool isPaletteHit = hasPaletteHighlight && PaneUsesPaletteColor(p, paletteHighlightColor);
 					bool isFilterRoot = PaneFilter.IsFilterRoot(p);
+					bool isMarqueeHit = marqueePreviewHits.Contains(p);
 
 					if (p is Pic1Pane pic)
 						DrawPicturePane(pic);
@@ -259,25 +292,24 @@ namespace BflytPreview
 						DrawPartsPane(prt);
 
 					GL.Disable(EnableCap.Texture2D);
-					if (showPaneFramesToolStripMenuItem.Checked)
+					if (showPaneFramesToolStripMenuItem.Checked || isMarqueeHit)
 					{
-						if (isTreeSelected)
+						if (isTreeSelected && showPaneFramesToolStripMenuItem.Checked)
 						{
 							DrawOnTop = p;
 							GL.GetFloat(GetPName.ModelviewMatrix, DrawOnTopTransform);
 						}
-						else if (isPaletteHit)
+						else if (isMarqueeHit)
 							DrawPane(p.transformedRect, Settings.Default.SelectedColor);
-						else if (isFilterRoot)
-							DrawPane(p.transformedRect, FilterRootOutlineColor);
-						else
-							DrawPane(p.transformedRect, color);
-					}
-					else if (isTreeSelected)
-					{
-						// Keep selection tracking so property edits still target the pane,
-						// but skip drawing the frame for a clean game preview.
-						DrawOnTop = null;
+						else if (showPaneFramesToolStripMenuItem.Checked)
+						{
+							if (isPaletteHit)
+								DrawPane(p.transformedRect, Settings.Default.SelectedColor);
+							else if (isFilterRoot)
+								DrawPane(p.transformedRect, FilterRootOutlineColor);
+							else
+								DrawPane(p.transformedRect, color);
+						}
 					}
 					GL.Enable(EnableCap.Texture2D);
 				}
@@ -1265,19 +1297,39 @@ namespace BflytPreview
 
 		private void glControl_MouseDown(object sender, MouseEventArgs e)
 		{
-			if (e.Button != MouseButtons.Left && e.Button != MouseButtons.Middle)
+			firstPoint = Control.MousePosition;
+
+			if (e.Button == MouseButtons.Middle || e.Button == MouseButtons.Right)
+			{
+				canvasDragMode = CanvasDragMode.Pan;
+				return;
+			}
+
+			if (e.Button != MouseButtons.Left)
 				return;
 
-			firstPoint = Control.MousePosition;
+			Pan1Pane target = treeView1.SelectedNode?.Tag as Pan1Pane;
+			if (ModifierKeys.HasFlag(Keys.Control) && target != null)
+			{
+				canvasDragMode = CanvasDragMode.MoveObject;
+				DraggedObject = false;
+				return;
+			}
+
+			canvasDragMode = CanvasDragMode.Marquee;
+			marqueeStartClient = e.Location;
+			marqueeEndClient = e.Location;
+			marqueePreviewHits.Clear();
 		}
 
 		private void helpToolStripMenuItem_Click(object sender, EventArgs e)
 		{
 			MessageBox.Show(
                 "Quick guide:\n\n" +
-				"- Moving the view: left-drag or middle-drag on the canvas\n\n" +
+				"- Select panes: left-drag a box that fully contains a pane's frame (Shift adds to the selection). Checked panes become palette whitelist roots.\n\n" +
+				"- Pan: middle-drag or right-drag on the canvas\n\n" +
                 "- Zoom: scroll the mouse wheel over the preview (or use the trackbar on the bottom left)\n\n" +
-                "- Dragging objects: First select an object in the tree view, it will be highlighted in the preview, then keeping CTRL pressed drag it with the cursor in the canvas\n\n" +
+                "- Dragging objects: select a pane in the tree, then Ctrl+left-drag it in the canvas\n\n" +
 				"- The green box: The green box represents the screen bounds, it's always at (0,0) and has the screen size.");
 		}
 
@@ -1309,29 +1361,32 @@ namespace BflytPreview
 		bool DraggedObject = false;
 		private void glControl_MouseMove(object sender, MouseEventArgs e)
 		{
-			if (!canMoveView)
-				return;
-
-			bool middlePan = e.Button == MouseButtons.Middle;
-			bool left = e.Button == MouseButtons.Left;
-			if (!middlePan && !left)
+			if (!canMoveView || canvasDragMode == CanvasDragMode.None)
 				return;
 
 			Point temp = Control.MousePosition;
 			Point res = new Point(firstPoint.X - temp.X, firstPoint.Y - temp.Y);
 
-			Pan1Pane target = null;
-			if (treeView1.SelectedNode != null)
-				target = treeView1.SelectedNode.Tag as Pan1Pane;
-
-			if (left && !middlePan && ModifierKeys.HasFlag(Keys.Control) && target != null)
+			if (canvasDragMode == CanvasDragMode.Marquee)
 			{
-				SetupObjectXYZ(target, res);
-				DraggedObject = true;
+				marqueeEndClient = e.Location;
+				UpdateMarqueePreviewHits();
+				firstPoint = temp;
+				glControl.Invalidate();
+				return;
 			}
-			else
+
+			if (canvasDragMode == CanvasDragMode.MoveObject)
 			{
-				// Left-drag (without Ctrl) or middle-drag pans the view.
+				Pan1Pane target = treeView1.SelectedNode?.Tag as Pan1Pane;
+				if (target != null)
+				{
+					SetupObjectXYZ(target, res);
+					DraggedObject = true;
+				}
+			}
+			else if (canvasDragMode == CanvasDragMode.Pan)
+			{
 				SetupCursorXYZ(res);
 			}
 
@@ -1533,11 +1588,174 @@ namespace BflytPreview
 
 		private void GlControl_MouseUp(object sender, MouseEventArgs e)
 		{
-			if (DraggedObject)
+			if (canvasDragMode == CanvasDragMode.Marquee && e.Button == MouseButtons.Left)
+			{
+				marqueeEndClient = e.Location;
+				CommitMarqueeSelection(addToSelection: ModifierKeys.HasFlag(Keys.Shift));
+				canvasDragMode = CanvasDragMode.None;
+				marqueePreviewHits.Clear();
+				glControl.Invalidate();
+				return;
+			}
+
+			if (canvasDragMode == CanvasDragMode.MoveObject && DraggedObject)
 			{
 				DraggedObject = false;
 				propertyGrid1.Refresh();
 			}
+
+			canvasDragMode = CanvasDragMode.None;
+			marqueePreviewHits.Clear();
+		}
+
+		void DrawMarqueeOverlay()
+		{
+			if (canvasDragMode != CanvasDragMode.Marquee)
+				return;
+
+			NormalizeClientRect(marqueeStartClient, marqueeEndClient, out int x0, out int y0, out int x1, out int y1);
+			if (x1 - x0 < 2 && y1 - y0 < 2)
+				return;
+
+			GL.Disable(EnableCap.Texture2D);
+			GL.Enable(EnableCap.Blend);
+			GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+			GL.MatrixMode(MatrixMode.Modelview);
+			GL.PushMatrix();
+			GL.LoadIdentity();
+
+			GL.Color4(0.2f, 0.55f, 1f, 0.15f);
+			GL.Begin(PrimitiveType.Quads);
+			GL.Vertex2(x0, y0);
+			GL.Vertex2(x1, y0);
+			GL.Vertex2(x1, y1);
+			GL.Vertex2(x0, y1);
+			GL.End();
+
+			GL.Color4(0.2f, 0.55f, 1f, 0.95f);
+			GL.Begin(PrimitiveType.LineLoop);
+			GL.Vertex2(x0, y0);
+			GL.Vertex2(x1, y0);
+			GL.Vertex2(x1, y1);
+			GL.Vertex2(x0, y1);
+			GL.End();
+
+			GL.PopMatrix();
+			GL.Enable(EnableCap.Texture2D);
+		}
+
+		static void NormalizeClientRect(Point a, Point b, out int x0, out int y0, out int x1, out int y1)
+		{
+			x0 = Math.Min(a.X, b.X);
+			y0 = Math.Min(a.Y, b.Y);
+			x1 = Math.Max(a.X, b.X);
+			y1 = Math.Max(a.Y, b.Y);
+		}
+
+		void UpdateMarqueePreviewHits()
+		{
+			marqueePreviewHits.Clear();
+			NormalizeClientRect(marqueeStartClient, marqueeEndClient, out int x0, out int y0, out int x1, out int y1);
+			if (x1 - x0 < 3 || y1 - y0 < 3)
+				return;
+			foreach (var pane in CollectFullyEnclosedPanes(x0, y0, x1, y1))
+				marqueePreviewHits.Add(pane);
+		}
+
+		void CommitMarqueeSelection(bool addToSelection)
+		{
+			NormalizeClientRect(marqueeStartClient, marqueeEndClient, out int x0, out int y0, out int x1, out int y1);
+			if (x1 - x0 < 3 || y1 - y0 < 3)
+				return;
+
+			var hits = CollectFullyEnclosedPanes(x0, y0, x1, y1);
+			if (!addToSelection)
+			{
+				UncheckAllTreeNodes(treeView1.Nodes);
+				PaneFilter.Mode = PaneFilterMode.Whitelist;
+				PaneFilter.SetRoots(hits);
+			}
+			else
+			{
+				var combined = new HashSet<BasePane>(PaneFilter.Roots);
+				foreach (var p in hits)
+					combined.Add(p);
+				PaneFilter.Mode = PaneFilterMode.Whitelist;
+				PaneFilter.SetRoots(combined);
+			}
+
+			SyncFilterChecksToTree();
+			OnPaneFilterChanged();
+			paletteWindow?.RefreshStatus();
+
+			if (hits.Count > 0)
+			{
+				TreeNode node = FindTreeNodeForPane(hits[0]);
+				if (node != null)
+				{
+					treeView1.SelectedNode = node;
+					node.EnsureVisible();
+				}
+			}
+		}
+
+		List<Pan1Pane> CollectFullyEnclosedPanes(int selX0, int selY0, int selX1, int selY1)
+		{
+			var hits = new List<Pan1Pane>();
+			foreach (var kv in paneScreenBounds)
+			{
+				if (kv.Value.FullyInside(selX0, selY0, selX1, selY1))
+					hits.Add(kv.Key);
+			}
+			return hits;
+		}
+
+		void CachePaneScreenBounds(Pan1Pane pane)
+		{
+			var r = pane.transformedRect;
+			if (r.width <= 0 || r.height <= 0)
+				return;
+
+			float[] mv = new float[16];
+			GL.GetFloat(GetPName.ModelviewMatrix, mv);
+
+			// Column-major modelview (same space DrawPane vertices use).
+			void Xform(float lx, float ly, out float sx, out float sy)
+			{
+				sx = mv[0] * lx + mv[4] * ly + mv[12];
+				sy = mv[1] * lx + mv[5] * ly + mv[13];
+			}
+
+			Xform(r.x, r.y, out float x0, out float y0);
+			Xform(r.x + r.width, r.y, out float x1, out float y1);
+			Xform(r.x + r.width, r.y + r.height, out float x2, out float y2);
+			Xform(r.x, r.y + r.height, out float x3, out float y3);
+
+			paneScreenBounds[pane] = new PaneScreenQuad
+			{
+				X0 = x0, Y0 = y0,
+				X1 = x1, Y1 = y1,
+				X2 = x2, Y2 = y2,
+				X3 = x3, Y3 = y3
+			};
+		}
+
+		TreeNode FindTreeNodeForPane(BasePane pane)
+		{
+			return FindTreeNodeForPane(treeView1.Nodes, pane);
+		}
+
+		static TreeNode FindTreeNodeForPane(TreeNodeCollection nodes, BasePane pane)
+		{
+			foreach (TreeNode n in nodes)
+			{
+				if (ReferenceEquals(n.Tag, pane))
+					return n;
+				TreeNode child = FindTreeNodeForPane(n.Nodes, pane);
+				if (child != null)
+					return child;
+			}
+			return null;
 		}
 
 		private void removeToolStripMenuItem_Click(object sender, EventArgs e)
