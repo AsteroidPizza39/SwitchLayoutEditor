@@ -61,7 +61,11 @@ namespace BflytPreview
 		// When set, panes whose materials use this palette color are drawn with SelectedColor
 		bool hasPaletteHighlight;
 		RGBAColor paletteHighlightColor;
-		readonly PaletteSheet paletteSheet;
+		PaletteWindow paletteWindow;
+		MaterialPaletteTag currentPalette;
+		static readonly Color FilterRootOutlineColor = Color.FromArgb(0, 180, 220);
+
+		internal PaneColorFilter PaneFilter { get; } = new PaneColorFilter();
 
 		public EditorView(BflytFile _layout, IFileWriter saveTo, byte[] bntxData = null, PartsLayoutCache parts = null)
 		{
@@ -76,27 +80,6 @@ namespace BflytPreview
 
 			treeView1.NodeMouseClick += (sender, args) => treeView1.SelectedNode = args.Node;
 
-			paletteSheet = new PaletteSheet
-			{
-				Visible = false,
-				Anchor = propertyGrid1.Anchor,
-				Location = propertyGrid1.Location,
-				Size = propertyGrid1.Size,
-				TabIndex = propertyGrid1.TabIndex
-			};
-			paletteSheet.HighlightColorChanged += color =>
-			{
-				hasPaletteHighlight = true;
-				paletteHighlightColor = color;
-				glControl?.Invalidate();
-			};
-			paletteSheet.PaletteChanged += () =>
-			{
-				// Keep the Palette node selected; refresh viewport (texture bake uses new colors).
-				bntxPreview.InvalidateShaded();
-				glControl?.Invalidate();
-			};
-			splitContainer2.Panel2.Controls.Add(paletteSheet);
 			zoomSlider.BringToFront();
 
 			glControl = new OpenTK.GLControl();
@@ -262,6 +245,7 @@ namespace BflytPreview
 				{
 					bool isTreeSelected = treeView1.SelectedNode != null && (p == treeView1.SelectedNode.Tag as Pan1Pane);
 					bool isPaletteHit = hasPaletteHighlight && PaneUsesPaletteColor(p, paletteHighlightColor);
+					bool isFilterRoot = PaneFilter.IsFilterRoot(p);
 
 					if (p is Pic1Pane pic)
 						DrawPicturePane(pic);
@@ -280,6 +264,8 @@ namespace BflytPreview
 					}
 					else if (isPaletteHit)
 						DrawPane(p.transformedRect, Settings.Default.SelectedColor);
+					else if (isFilterRoot)
+						DrawPane(p.transformedRect, FilterRootOutlineColor);
 					else
 						DrawPane(p.transformedRect, color);
 					GL.Enable(EnableCap.Texture2D);
@@ -1036,6 +1022,7 @@ namespace BflytPreview
 				var target = focus as BflytMaterial;
 				MaterialsRoot = treeView1.Nodes.Add("Materials");
 				int index = 0;
+				currentPalette = null;
 				if (layout.Mat1 != null)
 				{
 					foreach (var t in layout.Mat1.Materials)
@@ -1047,10 +1034,12 @@ namespace BflytPreview
 					}
 
 					var paletteNode = MaterialsRoot.Nodes.Add("Palette");
-					paletteNode.Tag = new MaterialPaletteTag(layout);
+					currentPalette = new MaterialPaletteTag(layout) { Filter = PaneFilter };
+					paletteNode.Tag = currentPalette;
 					if (focus is MaterialPaletteTag)
 						focusElement = paletteNode;
 				}
+				RefreshPaletteWindow();
 			}
 
 			Pan1Root = null;
@@ -1066,6 +1055,7 @@ namespace BflytPreview
 				RecursiveAddNode(r, AllPanesRoot.Nodes, focus as BasePane, ref focusElement, ref AllPanesRoot);
 			}
 
+			SyncFilterChecksToTree();
 			treeView1.ResumeLayout();
 			glControl.Invalidate();
 
@@ -1144,29 +1134,22 @@ namespace BflytPreview
 
 		private void treeView1_AfterSelect(object sender, TreeViewEventArgs e)
 		{
-			if (treeView1.SelectedNode?.Tag is MaterialPaletteTag paletteTag)
+			if (treeView1.SelectedNode?.Tag is MaterialPaletteTag)
 			{
-				propertyGrid1.Visible = false;
 				propertyGrid1.SelectedObject = null;
-				paletteSheet.Visible = true;
-				paletteSheet.Bind(paletteTag);
-				zoomSlider.BringToFront();
-				if (paletteSheet.Rows.Count > 0 &&
-				    paletteSheet.Rows[0].Tag is MaterialPaletteTag.PaletteRow first)
-				{
-					hasPaletteHighlight = true;
-					paletteHighlightColor = first.Color;
-				}
+				ShowPaletteWindow();
 			}
 			else
 			{
-				hasPaletteHighlight = false;
-				paletteSheet.Visible = false;
-				paletteSheet.ClearPalette();
-				propertyGrid1.Visible = true;
 				propertyGrid1.SelectedObject = treeView1.SelectedNode?.Tag;
 			}
 			glControl.Invalidate();
+		}
+
+		private void treeView1_BeforeCheck(object sender, TreeViewCancelEventArgs e)
+		{
+			if (!(e.Node.Tag is BasePane))
+				e.Cancel = true;
 		}
 
 		private void treeView1_KeyDown(object sender, KeyEventArgs e)
@@ -1269,6 +1252,11 @@ namespace BflytPreview
 			}
 			textGlTextures.Clear();
 			bntxPreview.Dispose();
+			if (paletteWindow != null)
+			{
+				paletteWindow.Dispose();
+				paletteWindow = null;
+			}
 			SaveTo?.EditorClosed();
 			Settings.Default.ShowImage = false;
 		}
@@ -1355,6 +1343,141 @@ namespace BflytPreview
 		private void collapseAllToolStripMenuItem_Click(object sender, EventArgs e)
 		{
 			treeView1.CollapseAll();
+		}
+
+		private void paletteToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			ShowPaletteWindow();
+		}
+
+		private void addCheckedToFilterToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			ApplyCheckedPanesAsFilter();
+		}
+
+		private void clearPaneFilterToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			ClearPaneFilter();
+		}
+
+		public void ShowPaletteWindow()
+		{
+			EnsurePaletteWindow();
+			if (currentPalette == null && layout.Mat1 != null)
+				currentPalette = new MaterialPaletteTag(layout) { Filter = PaneFilter };
+			if (currentPalette != null)
+				paletteWindow.BindPalette(currentPalette);
+			if (!paletteWindow.Visible)
+			{
+				if (paletteWindow.Location == Point.Empty || paletteWindow.Location.X < 0)
+				{
+					paletteWindow.StartPosition = FormStartPosition.Manual;
+					paletteWindow.Location = new Point(Right - 40, Top + 40);
+				}
+				paletteWindow.Show(this);
+			}
+			else
+			{
+				paletteWindow.BringToFront();
+				paletteWindow.Focus();
+			}
+		}
+
+		void EnsurePaletteWindow()
+		{
+			if (paletteWindow != null && !paletteWindow.IsDisposed)
+				return;
+			paletteWindow = new PaletteWindow(this);
+			paletteWindow.RefreshStatus();
+		}
+
+		void RefreshPaletteWindow()
+		{
+			if (paletteWindow == null || paletteWindow.IsDisposed || currentPalette == null)
+				return;
+			paletteWindow.BindPalette(currentPalette);
+		}
+
+		public void SetPaletteHighlight(RGBAColor color)
+		{
+			hasPaletteHighlight = true;
+			paletteHighlightColor = color;
+			glControl?.Invalidate();
+		}
+
+		public void OnPaletteEdited()
+		{
+			bntxPreview.InvalidateShaded();
+			glControl?.Invalidate();
+			RefreshPaletteWindow();
+		}
+
+		public void OnPaneFilterChanged()
+		{
+			if (currentPalette != null)
+				currentPalette.Filter = PaneFilter;
+			RefreshPaletteWindow();
+			glControl?.Invalidate();
+		}
+
+		public void ApplyCheckedPanesAsFilter()
+		{
+			PaneFilter.SetRoots(CollectCheckedPanes());
+			SyncFilterChecksToTree();
+			OnPaneFilterChanged();
+			paletteWindow?.RefreshStatus();
+		}
+
+		public void ClearPaneFilter()
+		{
+			PaneFilter.Clear();
+			UncheckAllTreeNodes(treeView1.Nodes);
+			OnPaneFilterChanged();
+			paletteWindow?.RefreshStatus();
+		}
+
+		List<BasePane> CollectCheckedPanes()
+		{
+			var list = new List<BasePane>();
+			CollectCheckedPanes(treeView1.Nodes, list);
+			return list;
+		}
+
+		static void CollectCheckedPanes(TreeNodeCollection nodes, List<BasePane> list)
+		{
+			foreach (TreeNode n in nodes)
+			{
+				if (n.Checked && n.Tag is BasePane pane)
+					list.Add(pane);
+				CollectCheckedPanes(n.Nodes, list);
+			}
+		}
+
+		void SyncFilterChecksToTree()
+		{
+			UncheckAllTreeNodes(treeView1.Nodes);
+			if (!PaneFilter.IsActive)
+				return;
+			CheckFilterRoots(treeView1.Nodes);
+		}
+
+		void CheckFilterRoots(TreeNodeCollection nodes)
+		{
+			foreach (TreeNode n in nodes)
+			{
+				if (n.Tag is BasePane pane && PaneFilter.Roots.Contains(pane))
+					n.Checked = true;
+				CheckFilterRoots(n.Nodes);
+			}
+		}
+
+		static void UncheckAllTreeNodes(TreeNodeCollection nodes)
+		{
+			foreach (TreeNode n in nodes)
+			{
+				n.Checked = false;
+				UncheckAllTreeNodes(n.Nodes);
+			}
 		}
 
 		private void GlControl_MouseUp(object sender, MouseEventArgs e)
@@ -1563,7 +1686,8 @@ namespace BflytPreview
 
 	/// <summary>
 	/// Palette tree node: unique material Black/White colors and pane/window/text vertex colors.
-	/// Editing a color replaces every matching slot of that kind across the layout.
+	/// Editing a color replaces matching slots; when a PaneColorFilter is active, only in-scope
+	/// panes (and materials they reference) are updated.
 	/// </summary>
 	internal class MaterialPaletteTag
 	{
@@ -1573,12 +1697,16 @@ namespace BflytPreview
 			public bool IsVertex;
 			public RGBAColor Color;
 			public int Usages;
+			public int ScopedUsages;
+			public string UsesText;
 		}
 
 		readonly BflytFile layout;
 		readonly List<BflytMaterial> materials;
 		readonly List<RGBAColor> materialColors = new List<RGBAColor>();
 		readonly List<RGBAColor> vertexColors = new List<RGBAColor>();
+
+		public PaneColorFilter Filter { get; set; }
 
 		public int MaterialCount => materialColors.Count;
 		public int VertexCount => vertexColors.Count;
@@ -1587,6 +1715,13 @@ namespace BflytPreview
 		{
 			this.layout = layout;
 			materials = layout.Mat1?.Materials ?? new List<BflytMaterial>();
+			RescanColors();
+		}
+
+		void RescanColors()
+		{
+			materialColors.Clear();
+			vertexColors.Clear();
 
 			var matSeen = new HashSet<RGBAColor>();
 			foreach (var mat in materials)
@@ -1635,27 +1770,38 @@ namespace BflytPreview
 
 		public List<PaletteRow> GetRows()
 		{
+			bool filterOn = Filter != null && Filter.IsActive;
+			HashSet<int> scopedMats = filterOn ? CollectInScopeMaterialIndices() : null;
+
 			var rows = new List<PaletteRow>(materialColors.Count + vertexColors.Count);
 			for (int i = 0; i < materialColors.Count; i++)
 			{
 				var c = materialColors[i];
+				int total = MaterialUsageCount(c, null);
+				int scoped = filterOn ? MaterialUsageCount(c, scopedMats) : total;
 				rows.Add(new PaletteRow
 				{
 					Index = i,
 					IsVertex = false,
 					Color = c,
-					Usages = MaterialUsageCount(c)
+					Usages = total,
+					ScopedUsages = scoped,
+					UsesText = filterOn ? $"{scoped}/{total}" : total.ToString()
 				});
 			}
 			for (int i = 0; i < vertexColors.Count; i++)
 			{
 				var c = vertexColors[i];
+				int total = VertexUsageCount(c, scopedOnly: false);
+				int scoped = filterOn ? VertexUsageCount(c, scopedOnly: true) : total;
 				rows.Add(new PaletteRow
 				{
 					Index = i,
 					IsVertex = true,
 					Color = c,
-					Usages = VertexUsageCount(c)
+					Usages = total,
+					ScopedUsages = scoped,
+					UsesText = filterOn ? $"{scoped}/{total}" : total.ToString()
 				});
 			}
 			return rows;
@@ -1667,76 +1813,122 @@ namespace BflytPreview
 				SetVertexColor(index, newColor);
 			else
 				SetMaterialColor(index, newColor);
+			RescanColors();
 		}
 
 		void SetMaterialColor(int index, RGBAColor newColor)
 		{
+			if (index < 0 || index >= materialColors.Count) return;
 			RGBAColor oldColor = materialColors[index];
 			if (oldColor == newColor) return;
 
-			foreach (var mat in materials)
+			HashSet<int> scoped = null;
+			if (Filter != null && Filter.IsActive)
+				scoped = CollectInScopeMaterialIndices();
+
+			for (int i = 0; i < materials.Count; i++)
 			{
+				if (scoped != null && !scoped.Contains(i))
+					continue;
+				var mat = materials[i];
 				if (mat.ForegroundColor == oldColor)
 					mat.ForegroundColor = newColor;
 				if (mat.BackgroundColor == oldColor)
 					mat.BackgroundColor = newColor;
 			}
-			materialColors[index] = newColor;
 		}
 
 		void SetVertexColor(int index, RGBAColor newColor)
 		{
+			if (index < 0 || index >= vertexColors.Count) return;
 			RGBAColor oldColor = vertexColors[index];
 			if (oldColor == newColor) return;
 
-			if (layout.ElementsRoot != null)
+			if (layout.ElementsRoot == null)
+				return;
+
+			foreach (var pane in layout.EnumeratePanes(layout.ElementsRoot))
 			{
-				foreach (var pane in layout.EnumeratePanes(layout.ElementsRoot))
+				if (Filter != null && !Filter.IsPaneInScope(pane))
+					continue;
+
+				if (pane is Pic1Pane pic)
 				{
-					if (pane is Pic1Pane pic)
+					if (pic.ColorTopLeft == oldColor) pic.ColorTopLeft = newColor;
+					if (pic.ColorTopRight == oldColor) pic.ColorTopRight = newColor;
+					if (pic.ColorBottomLeft == oldColor) pic.ColorBottomLeft = newColor;
+					if (pic.ColorBottomRight == oldColor) pic.ColorBottomRight = newColor;
+				}
+				else if (pane is Wnd1Pane wnd && wnd.Content != null)
+				{
+					if (wnd.Content.ColorTopLeft == oldColor) wnd.Content.ColorTopLeft = newColor;
+					if (wnd.Content.ColorTopRight == oldColor) wnd.Content.ColorTopRight = newColor;
+					if (wnd.Content.ColorBottomLeft == oldColor) wnd.Content.ColorBottomLeft = newColor;
+					if (wnd.Content.ColorBottomRight == oldColor) wnd.Content.ColorBottomRight = newColor;
+				}
+				else if (pane is Txt1Pane txt)
+				{
+					if (txt.FontTopColor == oldColor) txt.FontTopColor = newColor;
+					if (txt.FontBottomColor == oldColor) txt.FontBottomColor = newColor;
+					if (txt.ShadowTopColor == oldColor) txt.ShadowTopColor = newColor;
+					if (txt.ShadowBottomColor == oldColor) txt.ShadowBottomColor = newColor;
+				}
+			}
+		}
+
+		HashSet<int> CollectInScopeMaterialIndices()
+		{
+			var set = new HashSet<int>();
+			if (layout.ElementsRoot == null)
+				return set;
+
+			foreach (var pane in layout.EnumeratePanes(layout.ElementsRoot))
+			{
+				if (Filter != null && !Filter.IsPaneInScope(pane))
+					continue;
+
+				if (pane is Pic1Pane pic)
+					set.Add(pic.MaterialIndex);
+				else if (pane is Txt1Pane txt)
+					set.Add(txt.MaterialIndex);
+				else if (pane is Wnd1Pane wnd)
+				{
+					if (wnd.Content != null)
+						set.Add(wnd.Content.MaterialIndex);
+					if (wnd.Frames != null)
 					{
-						if (pic.ColorTopLeft == oldColor) pic.ColorTopLeft = newColor;
-						if (pic.ColorTopRight == oldColor) pic.ColorTopRight = newColor;
-						if (pic.ColorBottomLeft == oldColor) pic.ColorBottomLeft = newColor;
-						if (pic.ColorBottomRight == oldColor) pic.ColorBottomRight = newColor;
-					}
-					else if (pane is Wnd1Pane wnd && wnd.Content != null)
-					{
-						if (wnd.Content.ColorTopLeft == oldColor) wnd.Content.ColorTopLeft = newColor;
-						if (wnd.Content.ColorTopRight == oldColor) wnd.Content.ColorTopRight = newColor;
-						if (wnd.Content.ColorBottomLeft == oldColor) wnd.Content.ColorBottomLeft = newColor;
-						if (wnd.Content.ColorBottomRight == oldColor) wnd.Content.ColorBottomRight = newColor;
-					}
-					else if (pane is Txt1Pane txt)
-					{
-						if (txt.FontTopColor == oldColor) txt.FontTopColor = newColor;
-						if (txt.FontBottomColor == oldColor) txt.FontBottomColor = newColor;
-						if (txt.ShadowTopColor == oldColor) txt.ShadowTopColor = newColor;
-						if (txt.ShadowBottomColor == oldColor) txt.ShadowBottomColor = newColor;
+						foreach (var fr in wnd.Frames)
+							set.Add(fr.MaterialIndex);
 					}
 				}
 			}
-			vertexColors[index] = newColor;
+			return set;
 		}
 
-		int MaterialUsageCount(RGBAColor color)
+		int MaterialUsageCount(RGBAColor color, HashSet<int> onlyIndices)
 		{
 			int count = 0;
-			foreach (var mat in materials)
+			for (int i = 0; i < materials.Count; i++)
 			{
+				if (onlyIndices != null && !onlyIndices.Contains(i))
+					continue;
+				var mat = materials[i];
 				if (mat.ForegroundColor == color) count++;
 				if (mat.BackgroundColor == color) count++;
 			}
 			return count;
 		}
 
-		int VertexUsageCount(RGBAColor color)
+		int VertexUsageCount(RGBAColor color, bool scopedOnly)
 		{
 			int count = 0;
 			if (layout.ElementsRoot == null)
 				return 0;
 			foreach (var pane in layout.EnumeratePanes(layout.ElementsRoot))
 			{
+				if (scopedOnly && Filter != null && !Filter.IsPaneInScope(pane))
+					continue;
+
 				if (pane is Pic1Pane pic)
 				{
 					if (pic.ColorTopLeft == color) count++;

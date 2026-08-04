@@ -35,8 +35,12 @@
 			this.saveBFLYTToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.saveToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.viewToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+			this.paletteToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.expandAllToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.collapseAllToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+			this.addCheckedToFilterToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+			this.clearPaneFilterToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+			this.toolStripSeparatorFilter = new System.Windows.Forms.ToolStripSeparator();
 			this.helpToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.settingsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.splitContainer1 = new System.Windows.Forms.SplitContainer();
@@ -123,11 +127,21 @@
 			// viewToolStripMenuItem
 			// 
 			this.viewToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.paletteToolStripMenuItem,
             this.expandAllToolStripMenuItem,
             this.collapseAllToolStripMenuItem});
 			this.viewToolStripMenuItem.Name = "viewToolStripMenuItem";
 			this.viewToolStripMenuItem.Size = new System.Drawing.Size(44, 20);
 			this.viewToolStripMenuItem.Text = "View";
+			// 
+			// paletteToolStripMenuItem
+			// 
+			this.paletteToolStripMenuItem.Name = "paletteToolStripMenuItem";
+			this.paletteToolStripMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.P)));
+			this.paletteToolStripMenuItem.Size = new System.Drawing.Size(177, 22);
+			this.paletteToolStripMenuItem.Text = "Palette";
+			this.paletteToolStripMenuItem.ToolTipText = "Open the color palette window";
+			this.paletteToolStripMenuItem.Click += new System.EventHandler(this.paletteToolStripMenuItem_Click);
 			// 
 			// expandAllToolStripMenuItem
 			// 
@@ -205,11 +219,13 @@
 			this.treeView1.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
+			this.treeView1.CheckBoxes = true;
 			this.treeView1.ContextMenuStrip = this.PaneMenuStrip;
 			this.treeView1.Location = new System.Drawing.Point(0, 26);
 			this.treeView1.Name = "treeView1";
 			this.treeView1.Size = new System.Drawing.Size(266, 201);
 			this.treeView1.TabIndex = 3;
+			this.treeView1.BeforeCheck += new System.Windows.Forms.TreeViewCancelEventHandler(this.treeView1_BeforeCheck);
 			this.treeView1.ItemDrag += new System.Windows.Forms.ItemDragEventHandler(this.treeView1_ItemDrag);
 			this.treeView1.AfterSelect += new System.Windows.Forms.TreeViewEventHandler(this.treeView1_AfterSelect);
 			this.treeView1.NodeMouseClick += new System.Windows.Forms.TreeNodeMouseClickEventHandler(this.TreeView1_NodeMouseClick);
@@ -226,9 +242,12 @@
             this.removeToolStripMenuItem,
             this.toolStripSeparator1,
             this.moveUpToolStripMenuItem,
-            this.moveDownToolStripMenuItem});
+            this.moveDownToolStripMenuItem,
+            this.toolStripSeparatorFilter,
+            this.addCheckedToFilterToolStripMenuItem,
+            this.clearPaneFilterToolStripMenuItem});
 			this.PaneMenuStrip.Name = "contextMenuStrip1";
-			this.PaneMenuStrip.Size = new System.Drawing.Size(138, 120);
+			this.PaneMenuStrip.Size = new System.Drawing.Size(180, 176);
 			// 
 			// clonePaneToolStripMenuItem
 			// 
@@ -293,6 +312,25 @@
 			this.moveDownToolStripMenuItem.Size = new System.Drawing.Size(137, 22);
 			this.moveDownToolStripMenuItem.Text = "Move down";
 			this.moveDownToolStripMenuItem.Click += new System.EventHandler(this.MoveDownToolStripMenuItem_Click);
+			// 
+			// toolStripSeparatorFilter
+			// 
+			this.toolStripSeparatorFilter.Name = "toolStripSeparatorFilter";
+			this.toolStripSeparatorFilter.Size = new System.Drawing.Size(176, 6);
+			// 
+			// addCheckedToFilterToolStripMenuItem
+			// 
+			this.addCheckedToFilterToolStripMenuItem.Name = "addCheckedToFilterToolStripMenuItem";
+			this.addCheckedToFilterToolStripMenuItem.Size = new System.Drawing.Size(179, 22);
+			this.addCheckedToFilterToolStripMenuItem.Text = "Set filter from checked";
+			this.addCheckedToFilterToolStripMenuItem.Click += new System.EventHandler(this.addCheckedToFilterToolStripMenuItem_Click);
+			// 
+			// clearPaneFilterToolStripMenuItem
+			// 
+			this.clearPaneFilterToolStripMenuItem.Name = "clearPaneFilterToolStripMenuItem";
+			this.clearPaneFilterToolStripMenuItem.Size = new System.Drawing.Size(179, 22);
+			this.clearPaneFilterToolStripMenuItem.Text = "Clear pane filter";
+			this.clearPaneFilterToolStripMenuItem.Click += new System.EventHandler(this.clearPaneFilterToolStripMenuItem_Click);
 			// 
 			// zoomSlider
 			// 
@@ -447,6 +485,7 @@
 		private System.Windows.Forms.ToolStripMenuItem saveToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem settingsToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem viewToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem paletteToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem expandAllToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem collapseAllToolStripMenuItem;
         private System.Windows.Forms.ContextMenuStrip PaneMenuStrip;
@@ -468,5 +507,8 @@
 		private System.Windows.Forms.ToolStripSeparator toolStripSeparator1;
 		private System.Windows.Forms.ToolStripMenuItem moveUpToolStripMenuItem;
 		private System.Windows.Forms.ToolStripMenuItem moveDownToolStripMenuItem;
+		private System.Windows.Forms.ToolStripSeparator toolStripSeparatorFilter;
+		private System.Windows.Forms.ToolStripMenuItem addCheckedToFilterToolStripMenuItem;
+		private System.Windows.Forms.ToolStripMenuItem clearPaneFilterToolStripMenuItem;
 	}
 }

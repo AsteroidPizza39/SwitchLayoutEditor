@@ -136,7 +136,7 @@ namespace BflytPreview
 			var preview = LayoutDisplayColor.Lift(row.Color);
 			int index = Rows.Add(
 				row.IsVertex ? "Vertex" : "Material",
-				row.Usages.ToString(),
+				row.UsesText ?? row.Usages.ToString(),
 				"",
 				row.Color.ToString(),
 				"",
@@ -195,18 +195,19 @@ namespace BflytPreview
 			string name = Columns[e.ColumnIndex].Name;
 			string text = Convert.ToString(Rows[e.RowIndex].Cells[e.ColumnIndex].Value)?.Trim() ?? "";
 
+			RGBAColor newFileColor;
 			try
 			{
 				if (name == "FileValue")
 				{
-					RGBAColor parsed = ParseRgb(text, row.Color.A);
-					palette.SetColor(row.Index, row.IsVertex, parsed);
+					newFileColor = ParseRgb(text, row.Color.A);
+					palette.SetColor(row.Index, row.IsVertex, newFileColor);
 				}
 				else if (name == "GameValue")
 				{
 					RGBAColor appearance = ParseRgb(text, row.Color.A);
-					RGBAColor file = LayoutDisplayColor.InverseLift(appearance);
-					palette.SetColor(row.Index, row.IsVertex, file);
+					newFileColor = LayoutDisplayColor.InverseLift(appearance);
+					palette.SetColor(row.Index, row.IsVertex, newFileColor);
 				}
 				else
 					return;
@@ -217,9 +218,9 @@ namespace BflytPreview
 				return;
 			}
 
-			RefreshRow(e.RowIndex);
-			if (Rows[e.RowIndex].Tag is MaterialPaletteTag.PaletteRow updated)
-				HighlightColorChanged?.Invoke(updated.Color);
+			// Indices may shift after a scoped edit rescans unique colors.
+			Reload();
+			HighlightColorChanged?.Invoke(newFileColor);
 			PaletteChanged?.Invoke();
 		}
 
@@ -241,7 +242,7 @@ namespace BflytPreview
 			try
 			{
 				Rows[gridRow].Cells["Kind"].Value = row.IsVertex ? "Vertex" : "Material";
-				Rows[gridRow].Cells["Uses"].Value = row.Usages.ToString();
+				Rows[gridRow].Cells["Uses"].Value = row.UsesText ?? row.Usages.ToString();
 				Rows[gridRow].Cells["FileValue"].Value = row.Color.ToString();
 				Rows[gridRow].Cells["GameValue"].Value = preview.ToString();
 			}
