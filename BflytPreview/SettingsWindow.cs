@@ -19,7 +19,6 @@ namespace BflytPreview
             selectedColor.BackColor = Settings.Default.SelectedColor;
             outlineColor.BackColor = Settings.Default.OutlineColor;
             txtZsDicPath.Text = Settings.Default.ZsDicPackPath ?? string.Empty;
-            chkPreviewSubLayouts.Checked = Settings.Default.PreviewSubLayouts;
             if (!string.IsNullOrEmpty(Settings.Default.BgFileName) && File.Exists(Settings.Default.BgFileName))
             {
                 pictureBox1.BackgroundImage = Image.FromFile(Settings.Default.BgFileName);
@@ -37,7 +36,6 @@ namespace BflytPreview
             var zsDicPath = (txtZsDicPath.Text ?? string.Empty).Trim();
             var zsDicChanged = !string.Equals(Settings.Default.ZsDicPackPath ?? string.Empty, zsDicPath, StringComparison.OrdinalIgnoreCase);
             Settings.Default.ZsDicPackPath = zsDicPath;
-            Settings.Default.PreviewSubLayouts = chkPreviewSubLayouts.Checked;
             Settings.Default.Save();
             if (zsDicChanged)
                 GameZstd.ReloadFromSettings();

@@ -127,6 +127,7 @@ namespace BflytPreview
 			glControl.MouseWheel += glControl_MouseWheel;
 
 			SaveTo = saveTo;
+			showSubpanesToolStripMenuItem.Checked = Settings.Default.PreviewSubLayouts;
 		}
 
         #region OnLoad
@@ -1546,6 +1547,13 @@ namespace BflytPreview
 
 		private void showPaneFramesToolStripMenuItem_Click(object sender, EventArgs e)
 		{
+			glControl?.Invalidate();
+		}
+
+		private void showSubpanesToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			Settings.Default.PreviewSubLayouts = showSubpanesToolStripMenuItem.Checked;
+			Settings.Default.Save();
 			glControl?.Invalidate();
 		}
 

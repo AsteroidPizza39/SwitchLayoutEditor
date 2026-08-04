@@ -41,7 +41,6 @@
             this.labelZsDic = new System.Windows.Forms.Label();
             this.txtZsDicPath = new System.Windows.Forms.TextBox();
             this.btnBrowseZsDic = new System.Windows.Forms.Button();
-            this.chkPreviewSubLayouts = new System.Windows.Forms.CheckBox();
             ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
             this.SuspendLayout();
             // 
@@ -128,20 +127,10 @@
             this.showImg.UseVisualStyleBackColor = true;
             this.showImg.Click += new System.EventHandler(this.showImg_Click);
             // 
-            // chkPreviewSubLayouts
-            // 
-            this.chkPreviewSubLayouts.AutoSize = true;
-            this.chkPreviewSubLayouts.Location = new System.Drawing.Point(16, 164);
-            this.chkPreviewSubLayouts.Name = "chkPreviewSubLayouts";
-            this.chkPreviewSubLayouts.Size = new System.Drawing.Size(320, 17);
-            this.chkPreviewSubLayouts.TabIndex = 12;
-            this.chkPreviewSubLayouts.Text = "Preview sub-layouts (prt1) from archive sibling .bflyt files";
-            this.chkPreviewSubLayouts.UseVisualStyleBackColor = true;
-            // 
             // labelZsDic
             // 
             this.labelZsDic.AutoSize = true;
-            this.labelZsDic.Location = new System.Drawing.Point(13, 194);
+            this.labelZsDic.Location = new System.Drawing.Point(13, 164);
             this.labelZsDic.Name = "labelZsDic";
             this.labelZsDic.Size = new System.Drawing.Size(149, 13);
             this.labelZsDic.TabIndex = 9;
@@ -151,7 +140,7 @@
             // 
             this.txtZsDicPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.txtZsDicPath.Location = new System.Drawing.Point(16, 212);
+            this.txtZsDicPath.Location = new System.Drawing.Point(16, 182);
             this.txtZsDicPath.Name = "txtZsDicPath";
             this.txtZsDicPath.Size = new System.Drawing.Size(286, 20);
             this.txtZsDicPath.TabIndex = 10;
@@ -159,7 +148,7 @@
             // btnBrowseZsDic
             // 
             this.btnBrowseZsDic.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnBrowseZsDic.Location = new System.Drawing.Point(308, 210);
+            this.btnBrowseZsDic.Location = new System.Drawing.Point(308, 180);
             this.btnBrowseZsDic.Name = "btnBrowseZsDic";
             this.btnBrowseZsDic.Size = new System.Drawing.Size(75, 23);
             this.btnBrowseZsDic.TabIndex = 11;
@@ -171,8 +160,7 @@
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(393, 250);
-            this.Controls.Add(this.chkPreviewSubLayouts);
+            this.ClientSize = new System.Drawing.Size(393, 220);
             this.Controls.Add(this.btnBrowseZsDic);
             this.Controls.Add(this.txtZsDicPath);
             this.Controls.Add(this.labelZsDic);
@@ -210,6 +198,5 @@
         private System.Windows.Forms.Label labelZsDic;
         private System.Windows.Forms.TextBox txtZsDicPath;
         private System.Windows.Forms.Button btnBrowseZsDic;
-        private System.Windows.Forms.CheckBox chkPreviewSubLayouts;
     }
 }
