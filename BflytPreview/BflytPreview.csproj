@@ -237,6 +237,7 @@
     <Compile Include="PaletteSheet.cs" />
     <Compile Include="PartsLayoutCache.cs" />
     <Compile Include="BntxTextureDecoder.cs" />
+    <Compile Include="Compression\ArchiveCompression.cs" />
     <Compile Include="Compression\GameZstd.cs" />
     <Compile Include="Rendering\LayoutPic1Shader.cs" />
     <Compile Include="EditorView.Designer.cs">

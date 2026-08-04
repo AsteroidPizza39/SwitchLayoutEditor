@@ -5,6 +5,7 @@ using System.Data;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
+using BflytPreview.Compression;
 using SwitchThemes.Common;
 using SwitchThemes.Common.Patching;
 
@@ -56,13 +57,49 @@ namespace BflytPreview.EditorForms
 
         SarcData loadedSarc;
         MainForm MainForm;
+        ArchiveCompression archiveCompression;
+        int zstdDictionaryId;
 
-        public SzsEditor(SARCExt.SarcData _sarc, IFileWriter saveTo, MainForm _parentForm)
+        public SzsEditor(
+            SARCExt.SarcData _sarc,
+            IFileWriter saveTo,
+            MainForm _parentForm,
+            ArchiveCompression compression = ArchiveCompression.None,
+            int zstdDictionaryId = -1)
         {
             InitializeComponent();
             loadedSarc = _sarc;
             MainForm = _parentForm;
+            archiveCompression = compression;
+            this.zstdDictionaryId = zstdDictionaryId;
             SaveTo = saveTo;
+            ApplyCompressionUi();
+        }
+
+        void ApplyCompressionUi()
+        {
+            switch (archiveCompression)
+            {
+                case ArchiveCompression.Zstd:
+                    label1.Text = "ZSTD level [1-22] :";
+                    numericUpDown1.Minimum = 1;
+                    numericUpDown1.Maximum = 22;
+                    numericUpDown1.Value = Math.Min(22, Math.Max(1, GameZstd.Instance.CompressionLevel));
+                    break;
+                case ArchiveCompression.Yaz0:
+                    label1.Text = "Yaz0 level [0-9] :";
+                    numericUpDown1.Minimum = 0;
+                    numericUpDown1.Maximum = 9;
+                    if (numericUpDown1.Value < 1)
+                        numericUpDown1.Value = 3;
+                    break;
+                default:
+                    label1.Text = "Compression (0=none) :";
+                    numericUpDown1.Minimum = 0;
+                    numericUpDown1.Maximum = 9;
+                    numericUpDown1.Value = 0;
+                    break;
+            }
         }
 
         private void SzsEditor_Load(object sender, EventArgs e)
@@ -179,22 +216,75 @@ namespace BflytPreview.EditorForms
 
         byte[] PackArchive()
         {
-            if (numericUpDown1.Value == 0)
-                return SARC.Pack(loadedSarc).Item2;
-            else
+            // If the output path is clearly a TotK .zs but we somehow lost wrap info, prefer ZSTD.
+            if (archiveCompression == ArchiveCompression.None &&
+                SaveTo?.Path != null &&
+                SaveTo.Path.EndsWith(".zs", StringComparison.OrdinalIgnoreCase))
             {
-                var s = SARC.Pack(loadedSarc);
-                return ManagedYaz0.Compress(s.Item2, (int)numericUpDown1.Value, s.Item1);
+                archiveCompression = ArchiveCompression.Zstd;
+                ApplyCompressionUi();
+            }
+
+            var packed = SARC.Pack(loadedSarc);
+            byte[] sarcBytes = packed.Item2;
+
+            switch (archiveCompression)
+            {
+                case ArchiveCompression.Zstd:
+                    try
+                    {
+                        GameZstd.Instance.CompressionLevel = (int)numericUpDown1.Value;
+                        return GameZstd.Instance.Compress(sarcBytes, zstdDictionaryId);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(
+                            "ZSTD compress failed. Ensure Settings → ZsDic.pack.zs points at your game dump.\n\n" + ex.Message,
+                            "Save failed",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                        return null;
+                    }
+                case ArchiveCompression.Yaz0:
+                    int level = (int)numericUpDown1.Value;
+                    if (level <= 0)
+                        return sarcBytes;
+                    return ManagedYaz0.Compress(sarcBytes, level, packed.Item1);
+                default:
+                    if (numericUpDown1.Value > 0)
+                        return ManagedYaz0.Compress(sarcBytes, (int)numericUpDown1.Value, packed.Item1);
+                    return sarcBytes;
             }
         }
 
         void SaveSzsAs()
         {
-            var sav = new SaveFileDialog() { Filter = "szs file|*.szs|sarc file|*.sarc" };
+            var sav = new SaveFileDialog()
+            {
+                Filter =
+                    "ZSTD (.zs)|*.zs|" +
+                    "Yaz0 (.szs)|*.szs|" +
+                    "Uncompressed SARC|*.sarc;*.blarc;*.pack|All files|*.*"
+            };
+            if (SaveTo?.Path != null)
+                sav.FileName = Path.GetFileName(SaveTo.Path);
             if (sav.ShowDialog() != DialogResult.OK)
                 return;
-            SaveTo = new DiskFileProvider(sav.FileName);
-            SaveTo.Save(PackArchive());
+
+            string path = sav.FileName;
+            string ext = Path.GetExtension(path)?.ToLowerInvariant() ?? "";
+            if (sav.FilterIndex == 1 || ext == ".zs")
+                archiveCompression = ArchiveCompression.Zstd;
+            else if (sav.FilterIndex == 2 || ext == ".szs")
+                archiveCompression = ArchiveCompression.Yaz0;
+            else
+                archiveCompression = ArchiveCompression.None;
+            ApplyCompressionUi();
+
+            SaveTo = new DiskFileProvider(path);
+            byte[] data = PackArchive();
+            if (data != null)
+                SaveTo.Save(data);
         }
 
         private void saveAsToolStripMenuItem_Click(object sender, EventArgs e) =>
@@ -285,8 +375,13 @@ namespace BflytPreview.EditorForms
         private void saveToSzsToolStripMenuItem_Click(object sender, EventArgs e)
         {
             if (SaveTo == null)
+            {
                 SaveSzsAs();
-            else SaveTo.Save(PackArchive());
+                return;
+            }
+            byte[] data = PackArchive();
+            if (data != null)
+                SaveTo.Save(data);
         }
 
         void FormBringToFront()

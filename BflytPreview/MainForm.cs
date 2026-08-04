@@ -82,7 +82,16 @@ namespace BflytPreview
 		public Form OpenFileFromDisk(string path) =>
 			OpenFile(File.ReadAllBytes(path), new DiskFileProvider(path));
 
-		public Form OpenFile(byte[] File, IFileWriter saveTo, byte[] bntxData = null, SarcData partsSarc = null)
+		public Form OpenFile(byte[] File, IFileWriter saveTo, byte[] bntxData = null, SarcData partsSarc = null) =>
+			OpenFile(File, saveTo, bntxData, partsSarc, ArchiveCompression.None, -1);
+
+		Form OpenFile(
+			byte[] File,
+			IFileWriter saveTo,
+			byte[] bntxData,
+			SarcData partsSarc,
+			ArchiveCompression compression,
+			int zstdDictionaryId)
 		{
 			if (File == null || File.Length < 4)
 				return null;
@@ -90,12 +99,21 @@ namespace BflytPreview
 			string Magic = Encoding.ASCII.GetString(File, 0, 4);
 			Form result = null;
 			if (Magic == "Yaz0")
-				return OpenFile(ManagedYaz0.Decompress(File), saveTo, bntxData, partsSarc);
+			{
+				return OpenFile(
+					ManagedYaz0.Decompress(File),
+					saveTo, bntxData, partsSarc,
+					ArchiveCompression.Yaz0, -1);
+			}
 			else if (GameZstd.IsCompressed(File))
 			{
 				try
 				{
-					return OpenFile(GameZstd.Instance.Decompress(File), saveTo, bntxData, partsSarc);
+					byte[] decompressed = GameZstd.Instance.Decompress(File, out int dictId);
+					return OpenFile(
+						decompressed,
+						saveTo, bntxData, partsSarc,
+						ArchiveCompression.Zstd, dictId);
 				}
 				catch (Exception ex)
 				{
@@ -104,7 +122,14 @@ namespace BflytPreview
 				}
 			}
 			else if (Magic == "SARC")
-				result = new EditorForms.SzsEditor(SARCExt.SARC.Unpack(File), saveTo, this);
+			{
+				result = new EditorForms.SzsEditor(
+					SARCExt.SARC.Unpack(File),
+					saveTo,
+					this,
+					compression,
+					zstdDictionaryId);
+			}
 			else if (Magic == "FLYT")
 			{
 				PartsLayoutCache parts = null;

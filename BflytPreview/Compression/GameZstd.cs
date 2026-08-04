@@ -20,7 +20,30 @@ namespace BflytPreview.Compression
 
 		private readonly Decompressor _defaultDecompressor = new Decompressor();
 		private readonly Dictionary<int, Decompressor> _decompressors = new Dictionary<int, Decompressor>();
+		private readonly Compressor _defaultCompressor;
+		private readonly Dictionary<int, Compressor> _compressors = new Dictionary<int, Compressor>();
+		private int _compressionLevel = 7;
 		private bool _disposed;
+
+		public int CompressionLevel
+		{
+			get => _compressionLevel;
+			set
+			{
+				_compressionLevel = value;
+				_defaultCompressor.Level = value;
+				lock (_compressors)
+				{
+					foreach (var compressor in _compressors.Values)
+						compressor.Level = value;
+				}
+			}
+		}
+
+		public GameZstd()
+		{
+			_defaultCompressor = new Compressor(_compressionLevel);
+		}
 
 		public static GameZstd Instance
 		{
@@ -67,15 +90,48 @@ namespace BflytPreview.Compression
 			return data != null && data.Length > 3 && ReadUInt32(data, 0) == ZstdMagic;
 		}
 
-		public byte[] Decompress(byte[] data)
+		public byte[] Decompress(byte[] data) => Decompress(data, out _);
+
+		public byte[] Decompress(byte[] data, out int zsDictionaryId)
 		{
 			if (!IsCompressed(data))
+			{
+				zsDictionaryId = -1;
 				return data;
+			}
 
 			var size = GetDecompressedSize(data);
 			var result = new byte[size];
-			Decompress(data, result, out _);
+			Decompress(data, result, out zsDictionaryId);
 			return result;
+		}
+
+		public byte[] Compress(byte[] data, int zsDictionaryId = -1)
+		{
+			if (data == null)
+				throw new ArgumentNullException(nameof(data));
+
+			int bound = Compressor.GetCompressBound(data.Length);
+			var buffer = new byte[bound];
+			int written = Compress(data, buffer, zsDictionaryId);
+			if (written == buffer.Length)
+				return buffer;
+			var result = new byte[written];
+			Buffer.BlockCopy(buffer, 0, result, 0, written);
+			return result;
+		}
+
+		public int Compress(byte[] data, byte[] dst, int zsDictionaryId = -1)
+		{
+			lock (_compressors)
+			{
+				if (_compressors.TryGetValue(zsDictionaryId, out var compressor))
+					return compressor.Wrap(data, dst);
+			}
+			lock (_defaultCompressor)
+			{
+				return _defaultCompressor.Wrap(data, dst);
+			}
 		}
 
 		public void Decompress(byte[] data, byte[] dst, out int zsDictionaryId)
@@ -157,9 +213,18 @@ namespace BflytPreview.Compression
 			decompressor.LoadDictionary(buffer);
 			lock (_decompressors)
 			{
-				if (_decompressors.TryGetValue(dictId, out var old))
-					old.Dispose();
+				if (_decompressors.TryGetValue(dictId, out var oldDec))
+					oldDec.Dispose();
 				_decompressors[dictId] = decompressor;
+			}
+
+			var compressor = new Compressor(_compressionLevel);
+			compressor.LoadDictionary(buffer);
+			lock (_compressors)
+			{
+				if (_compressors.TryGetValue(dictId, out var oldComp))
+					oldComp.Dispose();
+				_compressors[dictId] = compressor;
 			}
 			return true;
 		}
@@ -236,11 +301,18 @@ namespace BflytPreview.Compression
 				return;
 			_disposed = true;
 			_defaultDecompressor.Dispose();
+			_defaultCompressor.Dispose();
 			lock (_decompressors)
 			{
 				foreach (var decompressor in _decompressors.Values)
 					decompressor.Dispose();
 				_decompressors.Clear();
+			}
+			lock (_compressors)
+			{
+				foreach (var compressor in _compressors.Values)
+					compressor.Dispose();
+				_compressors.Clear();
 			}
 		}
 	}
