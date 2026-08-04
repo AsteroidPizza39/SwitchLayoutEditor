@@ -16,6 +16,7 @@ namespace BflytPreview
 		bool suppressEvents;
 
 		public event Action<RGBAColor> HighlightColorChanged;
+		public event Action BeforePaletteChanged;
 		public event Action PaletteChanged;
 
 		public PaletteSheet()
@@ -201,12 +202,14 @@ namespace BflytPreview
 				if (name == "FileValue")
 				{
 					newFileColor = ParseRgb(text, row.Color.A);
+					BeforePaletteChanged?.Invoke();
 					palette.SetColor(row.Index, row.IsVertex, newFileColor);
 				}
 				else if (name == "GameValue")
 				{
 					RGBAColor appearance = ParseRgb(text, row.Color.A);
 					newFileColor = LayoutDisplayColor.InverseLift(appearance);
+					BeforePaletteChanged?.Invoke();
 					palette.SetColor(row.Index, row.IsVertex, newFileColor);
 				}
 				else

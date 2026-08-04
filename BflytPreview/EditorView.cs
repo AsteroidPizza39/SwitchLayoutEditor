@@ -94,6 +94,8 @@ namespace BflytPreview
 		static readonly Color FilterRootOutlineColor = Color.FromArgb(0, 180, 220);
 
 		internal PaneColorFilter PaneFilter { get; } = new PaneColorFilter();
+		readonly LayoutUndoStack undoStack = new LayoutUndoStack();
+		byte[] propertyGridBaseline;
 
 		public EditorView(BflytFile _layout, IFileWriter saveTo, byte[] bntxData = null, PartsLayoutCache parts = null)
 		{
@@ -1171,6 +1173,12 @@ namespace BflytPreview
 
 		private void propertyGrid1_PropertyValueChanged(object s, PropertyValueChangedEventArgs e)
 		{
+			// Baseline was captured when the object was selected (state before this edit).
+			if (propertyGridBaseline != null)
+				undoStack.Push(propertyGridBaseline);
+			propertyGridBaseline = CaptureLayoutSnapshot();
+			UpdateUndoMenuState();
+
 			if (e.ChangedItem.Label == "PaneName")
 				UpdateView();
 			glControl.Invalidate();
@@ -1187,6 +1195,7 @@ namespace BflytPreview
 			{
 				propertyGrid1.SelectedObject = treeView1.SelectedNode?.Tag;
 			}
+			propertyGridBaseline = CaptureLayoutSnapshot();
 			glControl.Invalidate();
 		}
 
@@ -1311,6 +1320,7 @@ namespace BflytPreview
 			Pan1Pane target = treeView1.SelectedNode?.Tag as Pan1Pane;
 			if (ModifierKeys.HasFlag(Keys.Control) && target != null)
 			{
+				PushUndoState();
 				canvasDragMode = CanvasDragMode.MoveObject;
 				DraggedObject = false;
 				return;
@@ -1330,6 +1340,7 @@ namespace BflytPreview
 				"- Pan: middle-drag or right-drag on the canvas\n\n" +
                 "- Zoom: scroll the mouse wheel over the preview (or use the trackbar on the bottom left)\n\n" +
                 "- Dragging objects: select a pane in the tree, then Ctrl+left-drag it in the canvas\n\n" +
+				"- Undo/Redo: Ctrl+Z / Ctrl+Y for layout edits (moves, palette, property grid, structure)\n\n" +
 				"- The green box: The green box represents the screen bounds, it's always at (0,0) and has the screen size.");
 		}
 
@@ -1516,6 +1527,93 @@ namespace BflytPreview
 			bntxPreview.InvalidateShaded();
 			glControl?.Invalidate();
 			RefreshPaletteWindow();
+			propertyGridBaseline = CaptureLayoutSnapshot();
+			UpdateUndoMenuState();
+		}
+
+		/// <summary>Call before mutating the layout (palette writes, structural edits).</summary>
+		public void PushUndoState()
+		{
+			undoStack.Push(CaptureLayoutSnapshot());
+			UpdateUndoMenuState();
+		}
+
+		byte[] CaptureLayoutSnapshot()
+		{
+			try
+			{
+				return layout?.SaveFile();
+			}
+			catch
+			{
+				return null;
+			}
+		}
+
+		void UpdateUndoMenuState()
+		{
+			if (undoToolStripMenuItem != null)
+				undoToolStripMenuItem.Enabled = undoStack.CanUndo;
+			if (redoToolStripMenuItem != null)
+				redoToolStripMenuItem.Enabled = undoStack.CanRedo;
+		}
+
+		private void undoToolStripMenuItem_Click(object sender, EventArgs e) => PerformUndo();
+
+		private void redoToolStripMenuItem_Click(object sender, EventArgs e) => PerformRedo();
+
+		void PerformUndo()
+		{
+			byte[] prev = undoStack.Undo(CaptureLayoutSnapshot());
+			if (prev == null) return;
+			RestoreLayoutSnapshot(prev);
+			UpdateUndoMenuState();
+		}
+
+		void PerformRedo()
+		{
+			byte[] next = undoStack.Redo(CaptureLayoutSnapshot());
+			if (next == null) return;
+			RestoreLayoutSnapshot(next);
+			UpdateUndoMenuState();
+		}
+
+		void RestoreLayoutSnapshot(byte[] data)
+		{
+			if (data == null || data.Length == 0) return;
+
+			var filterNames = new List<string>();
+			foreach (var root in PaneFilter.Roots)
+			{
+				if (root is INamedPane named && !string.IsNullOrEmpty(named.PaneName))
+					filterNames.Add(named.PaneName);
+			}
+			var filterMode = PaneFilter.Mode;
+			bool hadFilter = PaneFilter.IsActive;
+
+			layout = new BflytFile(data);
+			activeLayout = layout;
+			currentPalette = null;
+			bntxPreview.InvalidateShaded();
+
+			PaneFilter.Clear();
+			if (hadFilter && filterNames.Count > 0)
+			{
+				PaneFilter.Mode = filterMode;
+				var roots = new List<BasePane>();
+				foreach (var name in filterNames)
+				{
+					var pane = layout[name];
+					if (pane != null)
+						roots.Add(pane);
+				}
+				PaneFilter.SetRoots(roots);
+			}
+
+			UpdateView();
+			propertyGridBaseline = CaptureLayoutSnapshot();
+			RefreshPaletteWindow();
+			paletteWindow?.RefreshStatus();
 		}
 
 		public void OnPaneFilterChanged()
@@ -1768,7 +1866,8 @@ namespace BflytPreview
 					MessageBox.Show("You can't remove a root pane");
 					return;
 				}
-				
+
+				PushUndoState();
 				layout.RemovePane((BasePane)treeView1.SelectedNode.Tag);
 				
 				UpdateView(parent);
@@ -1787,6 +1886,7 @@ namespace BflytPreview
 		private void clonePaneToolStripMenuItem_Click(object sender, EventArgs e)
 		{
 			Pan1Pane pane = treeView1.SelectedNode.Tag as Pan1Pane;
+			PushUndoState();
 			layout.AddPane(-1, pane.Parent, pane.Clone());
 			UpdateView(pane);
 		}
@@ -1794,6 +1894,7 @@ namespace BflytPreview
 		void AddPane(BasePane p)
 		{
 			if (treeView1.SelectedNode.Tag as Pan1Pane == null) return;
+			PushUndoState();
 			layout.AddPane(-1, treeView1.SelectedNode.Tag as Pan1Pane, p);
 			UpdateView(p);
 		}
@@ -1802,6 +1903,7 @@ namespace BflytPreview
 		{
 			Grp1Pane pane = new Grp1Pane(layout.Version);
 			pane.GroupName = "New group";
+			PushUndoState();
 			layout.AddPane(-1, treeView1.SelectedNode.Tag as Grp1Pane, pane);
 			UpdateView(pane);
 		}
@@ -1824,6 +1926,7 @@ namespace BflytPreview
 		{
 			string name = "New_texture";
 			if (InputDialog.Show("Add new texture", "Enter a name for the new texture.", ref name) != DialogResult.OK) return;
+			PushUndoState();
 			layout.GetTexturesSection().Textures.Add(name);
 			UpdateView(name);
 		}
@@ -1831,6 +1934,7 @@ namespace BflytPreview
 		private void RemoveTexture_Click(object sender, EventArgs e)
 		{
 			if (treeView1.SelectedNode.Parent == null) return; //the texture must be in the root textures node
+			PushUndoState();
 			layout.Tex1.Textures.Remove(((TextureTag)treeView1.SelectedNode.Tag).TexName);
 			UpdateView();
 		}
@@ -1838,6 +1942,7 @@ namespace BflytPreview
 		private void RemoveMaterial_Click(object sender, EventArgs e)
 		{
 			if (treeView1.SelectedNode.Parent == null) return;
+			PushUndoState();
 			layout.Mat1.Materials.Remove((BflytMaterial)treeView1.SelectedNode.Tag);
 			UpdateView();
 		}
@@ -1851,6 +1956,7 @@ namespace BflytPreview
 				next.Name += "_";
 			else
 				next.Name = next.Name.Substring(0,26) + "_";
+			PushUndoState();
 			layout.GetMaterialsSection().Materials.Add(next);
 			UpdateView(next);
 		}
@@ -1859,6 +1965,7 @@ namespace BflytPreview
 		{
 			var p = treeView1.SelectedNode.Tag as BasePane;
 			if (p == null || p.Parent == null) return;
+			PushUndoState();
 			layout.MovePane(p, p.Parent, p.Parent.Children.IndexOf(p) - 1);
 			UpdateView(p);
 		}
@@ -1867,6 +1974,7 @@ namespace BflytPreview
 		{
 			var p = treeView1.SelectedNode.Tag as BasePane;
 			if (p == null || p.Parent == null) return;
+			PushUndoState();
 			layout.MovePane(p, p.Parent, p.Parent.Children.IndexOf(p) + 1);
 			UpdateView(p);
 		}
@@ -1917,7 +2025,8 @@ namespace BflytPreview
 			// Confirm that the node at the drop location is not 
 			// the dragged node or a descendant of the dragged node.
 			if (target == dragged || dragged.ContainsChild(target)) return;
-			
+
+			PushUndoState();
 			layout.RemovePane(dragged);
 			layout.AddPane(-1, target, dragged);
 			UpdateView(dragged);
@@ -1929,6 +2038,9 @@ namespace BflytPreview
 			e.SuppressKeyPress = true;
 			if (e.Shift && e.Control && e.KeyCode == Keys.S) saveBFLYTToolStripMenuItem.PerformClick();
 			else if (e.Control && e.KeyCode == Keys.S) saveToolStripMenuItem.PerformClick();
+			else if (e.Control && e.Shift && e.KeyCode == Keys.Z) { PerformRedo(); }
+			else if (e.Control && e.KeyCode == Keys.Z) { PerformUndo(); }
+			else if (e.Control && e.KeyCode == Keys.Y) { PerformRedo(); }
 			else if (e.Control && e.KeyCode == Keys.L) treeView1.ExpandAll();
 			else if (e.Control && e.KeyCode == Keys.K) treeView1.CollapseAll();
 			else e.SuppressKeyPress = false;

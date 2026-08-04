@@ -234,6 +234,7 @@
     </Compile>
     <Compile Include="BntxPreviewCache.cs" />
     <Compile Include="LayoutDisplayColor.cs" />
+    <Compile Include="LayoutUndoStack.cs" />
     <Compile Include="PaletteSheet.cs" />
     <Compile Include="PaletteWindow.cs">
       <SubType>Form</SubType>

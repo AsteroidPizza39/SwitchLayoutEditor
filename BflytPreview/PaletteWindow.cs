@@ -110,6 +110,7 @@ namespace BflytPreview
 
 			sheet = new PaletteSheet { Dock = DockStyle.Fill };
 			sheet.HighlightColorChanged += color => owner.SetPaletteHighlight(color);
+			sheet.BeforePaletteChanged += () => owner.PushUndoState();
 			sheet.PaletteChanged += () => owner.OnPaletteEdited();
 
 			Controls.Add(sheet);
