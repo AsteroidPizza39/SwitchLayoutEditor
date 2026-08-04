@@ -91,6 +91,8 @@ namespace BflytPreview
 			glControl.MouseDown += glControl_MouseDown;
 			glControl.MouseMove += glControl_MouseMove;
 			glControl.MouseUp += GlControl_MouseUp;
+			glControl.MouseEnter += (s, e) => glControl.Focus();
+			glControl.MouseWheel += glControl_MouseWheel;
 
 			SaveTo = saveTo;
 		}
@@ -1217,6 +1219,31 @@ namespace BflytPreview
 			glControl.Invalidate();
 		}
 
+		private void glControl_MouseWheel(object sender, MouseEventArgs e)
+		{
+			if (zoomSlider == null || glControl == null)
+				return;
+
+			int steps = e.Delta / SystemInformation.MouseWheelScrollDelta;
+			if (steps == 0)
+				steps = e.Delta > 0 ? 1 : -1;
+
+			int oldValue = zoomSlider.Value;
+			int newValue = Math.Max(zoomSlider.Minimum, Math.Min(zoomSlider.Maximum, oldValue + steps));
+			if (newValue == oldValue)
+				return;
+
+			double oldZoom = oldValue / 10.0;
+			double newZoom = newValue / 10.0;
+			// Keep the layout point under the cursor fixed (ortho is top-left origin).
+			double invDelta = 1.0 / oldZoom - 1.0 / newZoom;
+			x -= (float)(e.X * invDelta);
+			y += (float)(e.Y * invDelta);
+
+			zoomSlider.Value = newValue;
+			glControl.Invalidate();
+		}
+
 		private void SetupCursorXYZ(Point res)
 		{
 			x -= res.X;
@@ -1241,7 +1268,7 @@ namespace BflytPreview
 			MessageBox.Show(
                 "Quick guide:\n\n" +
 				"- Moving the view: to move the view just click anywhere in the canvas and drag the canvas\n\n" +
-                "- Zoom: To increase or reduce the zoom level use the trackbar on the bottom left\n\n" +
+                "- Zoom: scroll the mouse wheel over the preview (or use the trackbar on the bottom left)\n\n" +
                 "- Dragging objects: First select an object in the tree view, it will be highlighted in the preview, then keeping CTRL pressed drag it with the cursor in the canvas\n\n" +
 				"- The green box: The green box represents the screen bounds, it's always at (0,0) and has the screen size.");
 		}
