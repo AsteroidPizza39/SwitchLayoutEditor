@@ -25,6 +25,9 @@ namespace BflytPreview
 		/// <summary>Layout used for material/texture index lookup (host or active part).</summary>
 		BflytFile activeLayout;
 		PartsLayoutCache partsCache;
+		PatternAnimCache patternAnimCache;
+		/// <summary>Active FLTP overrides (material name → texture name) while drawing a part instance.</summary>
+		Dictionary<string, string> activePatternTextures;
 		IFileWriter _saveTo;
 		readonly BntxPreviewCache bntxPreview = new BntxPreviewCache();
 		readonly Dictionary<string, int> textGlTextures = new Dictionary<string, int>();
@@ -107,6 +110,7 @@ namespace BflytPreview
 			layout = _layout;
 			activeLayout = _layout;
 			partsCache = parts;
+			patternAnimCache = PatternAnimCache.FromPartsCache(parts);
 			if (bntxData != null)
 				bntxPreview.Load(bntxData);
 
@@ -456,9 +460,9 @@ namespace BflytPreview
 		}
 
 		/// <summary>
-		/// Simplified Cafe window draw. HorizontalNoContent (e.g. LoadingFade W_SideBGDeco)
-		/// paints the right rail with frame[0] (LoadingSideBG) and the left strip with frame[1].
-		/// Other kinds draw content when present, then cover with frame[0] if needed.
+		/// Cafe window draw aligned with Switch-Toolbox BxlytToGL.DrawWindowPane.
+		/// HorizontalNoContent keeps the LoadingFade side-rail path; Around uses
+		/// FrameCount 1/4/8 corner (and side) pieces with TextureFlip.
 		/// </summary>
 		void DrawWindowPane(Wnd1Pane wnd)
 		{
@@ -478,7 +482,10 @@ namespace BflytPreview
 
 			var rect = wnd.transformedRect;
 			float dX = rect.x;
-			float dY = rect.y;
+			// Toolbox DrawQuad uses Y-up with (x,y) as the top edge and height extending downward.
+			// transformedRect.y is the bottom edge; convert so piece math matches Toolbox.
+			float dYTop = rect.y + rect.height;
+			float dYBottom = rect.y;
 			float paneW = rect.width;
 			float paneH = rect.height;
 			if (paneW <= 0f || paneH <= 0f)
@@ -491,35 +498,38 @@ namespace BflytPreview
 
 			if (wnd.Frames != null && wnd.Frames.Count > 0)
 			{
-				// FrameCount 1 and 2: Toolbox (and the game) size strips from frame[0]'s texture
-				// when FrameElement L/R are left at 0 (LoadingFade W_SideBGDeco = 190×1080).
+				// Match Toolbox BxlytToGL: FrameCount 1/2/4/8 take strip sizes from the
+				// bound textures first, then fall back to FrameElement when size is 0.
 				if ((wnd.FrameCount == 1 || wnd.FrameCount == 2) &&
 					bntxPreview.TryGetTextureSize(activeLayout, wnd.Frames[0].MaterialIndex, out float oneW, out float oneH))
 				{
-					if (frameLeft <= 0f) frameLeft = oneW;
-					if (frameRight <= 0f) frameRight = oneW;
-					if (frameTop <= 0f) frameTop = oneH;
-					if (frameBottom <= 0f) frameBottom = oneH;
+					frameLeft = frameRight = oneW;
+					frameTop = frameBottom = oneH;
 				}
 				else if ((wnd.FrameCount == 4 || wnd.FrameCount == 8) && wnd.Frames.Count >= 4)
 				{
 					if (bntxPreview.TryGetTextureSize(activeLayout, wnd.Frames[0].MaterialIndex, out float fl, out float ft))
 					{
-						if (frameLeft <= 0f) frameLeft = fl;
-						if (frameTop <= 0f) frameTop = ft;
+						frameLeft = fl;
+						frameTop = ft;
 					}
 					if (bntxPreview.TryGetTextureSize(activeLayout, wnd.Frames[3].MaterialIndex, out float fr, out float fb))
 					{
-						if (frameRight <= 0f) frameRight = fr;
-						if (frameBottom <= 0f) frameBottom = fb;
+						frameRight = fr;
+						frameBottom = fb;
 					}
 				}
 			}
 
-			if (frameLeft <= 0f && wnd.FrameElementLeft > 0) frameLeft = wnd.FrameElementLeft;
-			if (frameRight <= 0f && wnd.FrameElementRight > 0) frameRight = wnd.FrameElementRight;
-			if (frameTop <= 0f && wnd.FrameElementTop > 0) frameTop = wnd.FrameElementTop;
-			if (frameBottom <= 0f && wnd.FrameElementBottom > 0) frameBottom = wnd.FrameElementBottom;
+			if (frameLeft <= 0f) frameLeft = wnd.FrameElementLeft;
+			if (frameRight <= 0f) frameRight = wnd.FrameElementRight;
+			if (frameTop <= 0f) frameTop = wnd.FrameElementTop;
+			if (frameBottom <= 0f) frameBottom = wnd.FrameElementBottom;
+
+			float contentW = ((wnd.StretchLeft + (paneW - frameLeft)) - frameRight) + wnd.StretchRight;
+			float contentH = wnd.Kind == Wnd1Pane.WindowKind.Horizontal
+				? paneH
+				: ((wnd.StretchTop + (paneH - frameTop)) - frameBottom) + wnd.StretchBottom;
 
 			// Content (not drawn for HorizontalNoContent — matches Toolbox).
 			if (wnd.Kind != Wnd1Pane.WindowKind.HorizontalNoContent)
@@ -534,28 +544,20 @@ namespace BflytPreview
 						BottomRight = (1, 1)
 					};
 
-				float fl = Math.Max(0f, frameLeft);
-				float fr = Math.Max(0f, frameRight);
-				float ft = Math.Max(0f, frameTop);
-				float fb = Math.Max(0f, frameBottom);
+				float contentX = dX + frameLeft - wnd.StretchLeft;
+				float contentTop = wnd.Kind == Wnd1Pane.WindowKind.Horizontal
+					? dYTop
+					: dYTop - frameTop + wnd.StretchTop;
 
-				float contentX = dX + fl - wnd.StretchLeft;
-				float contentY = wnd.Kind == Wnd1Pane.WindowKind.Horizontal
-					? dY
-					: dY + ft - wnd.StretchTop;
-				float contentW = ((wnd.StretchLeft + (paneW - fl)) - fr) + wnd.StretchRight;
-				float contentH = wnd.Kind == Wnd1Pane.WindowKind.Horizontal
-					? paneH
-					: ((wnd.StretchTop + (paneH - ft)) - fb) + wnd.StretchBottom;
-
-				DrawTexturedQuad(
+				DrawWindowQuad(
 					wnd.Content.MaterialIndex,
-					contentX, contentY, contentW, contentH,
+					contentX, contentTop, contentW, contentH,
 					uv.TopLeft.X, uv.TopLeft.Y,
 					uv.TopRight.X, uv.TopRight.Y,
 					uv.BottomRight.X, uv.BottomRight.Y,
 					uv.BottomLeft.X, uv.BottomLeft.Y,
-					cTL, cTR, cBR, cBL);
+					cTL, cTR, cBR, cBL,
+					Wnd1Pane.WindowFrameTexFlip.None);
 			}
 
 			if (wnd.Frames == null || wnd.Frames.Count == 0)
@@ -595,7 +597,7 @@ namespace BflytPreview
 						: wnd.Content.MaterialIndex;
 					DrawTexturedQuad(
 						fillMat,
-						dX + stripW, dY, paneW - stripW, paneH,
+						dX + stripW, dYBottom, paneW - stripW, paneH,
 						0f, 0f, 1f, 0f, 1f, 1f, 0f, 1f,
 						cTL, cTR, cBR, cBL);
 				}
@@ -603,7 +605,7 @@ namespace BflytPreview
 				// Vertex colors tint the opaque texels (cream); alpha comes from the baked mask.
 				DrawTexturedQuad(
 					wnd.Frames[0].MaterialIndex,
-					dX, dY, stripW, paneH,
+					dX, dYBottom, stripW, paneH,
 					0f, 0f, 1f, 0f, 1f, 1f, 0f, 1f,
 					cTL, cTR, cBR, cBL);
 			}
@@ -613,33 +615,246 @@ namespace BflytPreview
 				float fr = Math.Max(1f, frameRight);
 				DrawTexturedQuad(
 					wnd.Frames[0].MaterialIndex,
-					dX, dY, fl, paneH,
+					dX, dYBottom, fl, paneH,
 					0f, 0f, 1f, 0f, 1f, 1f, 0f, 1f,
 					frameColors[1], frameColors[1], frameColors[2], frameColors[2]);
 
 				ushort rightMat = wnd.Frames.Count >= 2
 					? wnd.Frames[1].MaterialIndex
 					: wnd.Frames[0].MaterialIndex;
-				float contentW = ((wnd.StretchLeft + (paneW - fl)) - fr) + wnd.StretchRight;
 				DrawTexturedQuad(
 					rightMat,
-					dX + fr + contentW, dY, fr, paneH,
+					dX + fr + contentW, dYBottom, fr, paneH,
 					1f, 0f, 0f, 0f, 0f, 1f, 1f, 1f,
 					frameColors[0], frameColors[0], frameColors[3], frameColors[3]);
 			}
 			else
 			{
-				float fl = Math.Max(1f, frameLeft);
-				float fr = Math.Max(0f, frameRight);
-				float ft = Math.Max(1f, frameTop);
-				float pieceW = paneW - fr;
-				float pieceH = ft;
+				// Around — port of Toolbox FrameCount 1 / 4 / 8.
+				DrawAroundWindowFrames(
+					wnd, dX, dYTop, paneW, paneH,
+					frameLeft, frameRight, frameTop, frameBottom,
+					contentW, contentH, frameColors);
+			}
+		}
+
+		void DrawAroundWindowFrames(
+			Wnd1Pane wnd,
+			float dX, float dYTop, float paneW, float paneH,
+			float frameLeft, float frameRight, float frameTop, float frameBottom,
+			float contentW, float contentH,
+			Vector4[] colors)
+		{
+			int count = Math.Min(wnd.FrameCount, wnd.Frames.Count);
+			if (count <= 0)
+				return;
+
+			float fl = Math.Max(1f, frameLeft);
+			float fr = Math.Max(1f, frameRight);
+			float ft = Math.Max(1f, frameTop);
+			float fb = Math.Max(1f, frameBottom);
+
+			if (count >= 8)
+			{
+				// Corners (unit UVs) + side stretches.
+				DrawWindowQuad(wnd.Frames[0].MaterialIndex, dX, dYTop, fl, ft,
+					0, 0, 1, 0, 1, 1, 0, 1, colors[0], colors[1], colors[2], colors[3], wnd.Frames[0].TextureFlip);
+				DrawWindowQuad(wnd.Frames[1].MaterialIndex, dX + paneW - fr, dYTop, fr, ft,
+					0, 0, 1, 0, 1, 1, 0, 1, colors[0], colors[1], colors[2], colors[3], wnd.Frames[1].TextureFlip);
+				DrawWindowQuad(wnd.Frames[2].MaterialIndex, dX, dYTop - paneH + ft, fl, fb,
+					0, 0, 1, 0, 1, 1, 0, 1, colors[0], colors[1], colors[2], colors[3], wnd.Frames[2].TextureFlip);
+				DrawWindowQuad(wnd.Frames[3].MaterialIndex, dX + paneW - fl, dYTop - paneH + fb, fr, fb,
+					0, 0, 1, 0, 1, 1, 0, 1, colors[0], colors[1], colors[2], colors[3], wnd.Frames[3].TextureFlip);
+
+				float uSide = (paneW - fl) / fl;
+				float vSide = (paneH - ft) / ft;
+				DrawWindowQuad(wnd.Frames[4].MaterialIndex, dX + fl, dYTop, contentW, ft,
+					0, 0, uSide, 0, uSide, 1, 0, 1, colors[0], colors[1], colors[2], colors[3], wnd.Frames[4].TextureFlip);
+				DrawWindowQuad(wnd.Frames[5].MaterialIndex, dX + fr, dYTop - (paneH - fb), contentW, ft,
+					1 - uSide, 0, 1, 0, 1, 1, 1 - uSide, 1, colors[0], colors[1], colors[2], colors[3], wnd.Frames[5].TextureFlip);
+				DrawWindowQuad(wnd.Frames[6].MaterialIndex, dX, dYTop - ft, fl, contentH,
+					0, 1 - vSide, 1, 1 - vSide, 1, 1, 0, 1, colors[0], colors[1], colors[2], colors[3], wnd.Frames[6].TextureFlip);
+				DrawWindowQuad(wnd.Frames[7].MaterialIndex, dX + paneW - fr, dYTop - ft, fr, contentH,
+					0, 0, 1, 0, 1, vSide, 0, vSide, colors[0], colors[1], colors[2], colors[3], wnd.Frames[7].TextureFlip);
+				return;
+			}
+
+			if (count >= 4)
+			{
 				float uExtent = (paneW - fl) / fl;
-				DrawTexturedQuad(
-					wnd.Frames[0].MaterialIndex,
-					dX, dY, pieceW, pieceH,
-					0f, 0f, uExtent, 0f, uExtent, 1f, 0f, 1f,
-					frameColors[0], frameColors[1], frameColors[2], frameColors[3]);
+				float vExtent = (paneH - ft) / ft;
+
+				// TL — top strip across (width - right frame)
+				DrawWindowQuad(wnd.Frames[0].MaterialIndex,
+					dX, dYTop, paneW - fr, ft,
+					0, 0, uExtent, 0, uExtent, 1, 0, 1,
+					colors[0], colors[1], colors[2], colors[3], wnd.Frames[0].TextureFlip);
+
+				// TR — right strip down from top
+				DrawWindowQuad(wnd.Frames[1].MaterialIndex,
+					dX + paneW - fr, dYTop, fr, paneH - fb,
+					0, 0, 1, 0, 1, vExtent, 0, vExtent,
+					colors[0], colors[1], colors[2], colors[3], wnd.Frames[1].TextureFlip);
+
+				// BL — left strip below the top frame
+				DrawWindowQuad(wnd.Frames[2].MaterialIndex,
+					dX, dYTop - ft, fl, paneH - ft,
+					0, 1 - vExtent, 1, 1 - vExtent, 1, 1, 0, 1,
+					colors[0], colors[1], colors[2], colors[3], wnd.Frames[2].TextureFlip);
+
+				// BR — bottom strip from left frame to right edge
+				DrawWindowQuad(wnd.Frames[3].MaterialIndex,
+					dX + fl, dYTop - paneH + fb, paneW - fl, fb,
+					1 - uExtent, 0, 1, 0, 1, 1, 1 - uExtent, 1,
+					colors[0], colors[1], colors[2], colors[3], wnd.Frames[3].TextureFlip);
+				return;
+			}
+
+			// FrameCount 1 Around: single material wraps all four edges (Toolbox case 1).
+			float u1 = (paneW - fl) / fl;
+			float vTop = (paneH - ft) / ft;
+			float vBot = (paneH - fb) / fb;
+			var flip0 = wnd.Frames[0].TextureFlip;
+			ushort mat0 = wnd.Frames[0].MaterialIndex;
+
+			DrawWindowQuad(mat0, dX, dYTop, paneW - fr, ft,
+				0, 0, u1, 0, u1, 1, 0, 1, colors[0], colors[1], colors[2], colors[3], flip0);
+			DrawWindowQuad(mat0, dX + paneW - fr, dYTop, fr, paneH - fb,
+				1, 0, 0, 0, 0, vTop, 1, vTop, colors[0], colors[1], colors[2], colors[3], flip0);
+			DrawWindowQuad(mat0, dX, dYTop - ft, fl, paneH - ft,
+				0, vBot, 1, vBot, 1, 0, 0, 0, colors[0], colors[1], colors[2], colors[3], flip0);
+			DrawWindowQuad(mat0, dX + fl, dYTop - paneH + fb, paneW - fl, fb,
+				u1, 1, 0, 1, 0, 0, u1, 0, colors[0], colors[1], colors[2], colors[3], flip0);
+		}
+
+		/// <summary>
+		/// Draw a window piece using Toolbox Y-up (x, yTop, w, h) coordinates.
+		/// Vertex winding matches BxlytToGL.DrawQuad (TL→TR→BR→BL, height downward).
+		/// V is inverted after TextureFlip because BntxTextureDecoder flips uploads so GL
+		/// V=0 is the image bottom, while Cafe/Toolbox window UVs treat V=0 as image top.
+		/// </summary>
+		void DrawWindowQuad(
+			ushort materialIndex,
+			float x, float yTop, float w, float h,
+			float u0, float v0, float u1, float v1, float u2, float v2, float u3, float v3,
+			Vector4 c0, Vector4 c1, Vector4 c2, Vector4 c3,
+			Wnd1Pane.WindowFrameTexFlip flip)
+		{
+			if (w <= 0f || h <= 0f)
+				return;
+
+			ApplyWindowTextureFlip(flip, ref u0, ref v0);
+			ApplyWindowTextureFlip(flip, ref u1, ref v1);
+			ApplyWindowTextureFlip(flip, ref u2, ref v2);
+			ApplyWindowTextureFlip(flip, ref u3, ref v3);
+			v0 = 1f - v0;
+			v1 = 1f - v1;
+			v2 = 1f - v2;
+			v3 = 1f - v3;
+
+			BflytMaterial mat = null;
+			if (activeLayout.Mat1?.Materials != null && materialIndex < activeLayout.Mat1.Materials.Count)
+				mat = activeLayout.Mat1.Materials[materialIndex];
+
+			var black = mat != null ? ToVec4(mat.ForegroundColor) : new Vector4(0f, 0f, 0f, 0f);
+			var white = mat != null ? ToVec4(mat.BackgroundColor) : new Vector4(1f, 1f, 1f, 1f);
+			if (white.W <= 0f)
+				white.W = 1f;
+
+			bool hasTexture = false;
+			var wrapS = BflytMaterial.TextureReference.WRAPS.Clamp;
+			var wrapT = BflytMaterial.TextureReference.WRAPS.Clamp;
+			Matrix4 texTransform = LayoutPic1Shader.IdentityTransform;
+
+			if (mat?.Textures != null && mat.Textures.Length > 0)
+			{
+				hasTexture = bntxPreview.BindMaterialTexture(activeLayout, materialIndex, white, black, out _, out wrapS, out wrapT);
+				if (mat.TextureTransformations != null && mat.TextureTransformations.Length > 0)
+				{
+					var t = mat.TextureTransformations[0];
+					texTransform = LayoutPic1Shader.BuildTextureTransform(t.X, t.Y, t.Rotation, t.ScaleX, t.ScaleY);
+				}
+			}
+
+			GL.ActiveTexture(TextureUnit.Texture0);
+			if (hasTexture)
+			{
+				GL.Enable(EnableCap.Texture2D);
+				GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)ToGlWrap(wrapS));
+				GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)ToGlWrap(wrapT));
+			}
+			else
+			{
+				GL.BindTexture(TextureTarget.Texture2D, 0);
+				GL.Disable(EnableCap.Texture2D);
+			}
+
+			// Toolbox DrawQuad: top edge at yTop, extending downward by h.
+			GL.Begin(PrimitiveType.Quads);
+			if (hasTexture)
+			{
+				GL.Color4(c0.X, c0.Y, c0.Z, c0.W);
+				EmitTransformedTexCoord(texTransform, u0, v0);
+				GL.Vertex2(x, yTop);
+				GL.Color4(c1.X, c1.Y, c1.Z, c1.W);
+				EmitTransformedTexCoord(texTransform, u1, v1);
+				GL.Vertex2(x + w, yTop);
+				GL.Color4(c2.X, c2.Y, c2.Z, c2.W);
+				EmitTransformedTexCoord(texTransform, u2, v2);
+				GL.Vertex2(x + w, yTop - h);
+				GL.Color4(c3.X, c3.Y, c3.Z, c3.W);
+				EmitTransformedTexCoord(texTransform, u3, v3);
+				GL.Vertex2(x, yTop - h);
+			}
+			else
+			{
+				Vector4 Tint(Vector4 c) => new Vector4(c.X * white.X, c.Y * white.Y, c.Z * white.Z, c.W * white.W);
+				var t = Tint(c0);
+				GL.Color4(t.X, t.Y, t.Z, t.W); GL.Vertex2(x, yTop);
+				t = Tint(c1);
+				GL.Color4(t.X, t.Y, t.Z, t.W); GL.Vertex2(x + w, yTop);
+				t = Tint(c2);
+				GL.Color4(t.X, t.Y, t.Z, t.W); GL.Vertex2(x + w, yTop - h);
+				t = Tint(c3);
+				GL.Color4(t.X, t.Y, t.Z, t.W); GL.Vertex2(x, yTop - h);
+			}
+			GL.End();
+
+			GL.BindTexture(TextureTarget.Texture2D, 0);
+			GL.Enable(EnableCap.Texture2D);
+		}
+
+		static void ApplyWindowTextureFlip(Wnd1Pane.WindowFrameTexFlip flip, ref float u, ref float v)
+		{
+			// Matches Toolbox Rev Shader SetFlip (rotateUV with +degrees).
+			switch (flip)
+			{
+				case Wnd1Pane.WindowFrameTexFlip.FlipH:
+					u = 1f - u;
+					break;
+				case Wnd1Pane.WindowFrameTexFlip.FlipV:
+					v = 1f - v;
+					break;
+				case Wnd1Pane.WindowFrameTexFlip.Rotate90:
+					{
+						float nu = v;
+						float nv = 1f - u;
+						u = nu;
+						v = nv;
+						break;
+					}
+				case Wnd1Pane.WindowFrameTexFlip.Rotate180:
+					u = 1f - u;
+					v = 1f - v;
+					break;
+				case Wnd1Pane.WindowFrameTexFlip.Rotate270:
+					{
+						float nu = 1f - v;
+						float nv = u;
+						u = nu;
+						v = nv;
+						break;
+					}
 			}
 		}
 
