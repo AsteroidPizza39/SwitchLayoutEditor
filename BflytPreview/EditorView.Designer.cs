@@ -41,6 +41,7 @@
 			this.paletteToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.showPaneFramesToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.showSubpanesToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+			this.forceAllVisibleToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.expandAllToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.collapseAllToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 			this.addCheckedToFilterToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -164,6 +165,7 @@
             this.paletteToolStripMenuItem,
             this.showPaneFramesToolStripMenuItem,
             this.showSubpanesToolStripMenuItem,
+            this.forceAllVisibleToolStripMenuItem,
             this.expandAllToolStripMenuItem,
             this.collapseAllToolStripMenuItem});
 			this.viewToolStripMenuItem.Name = "viewToolStripMenuItem";
@@ -198,6 +200,15 @@
 			this.showSubpanesToolStripMenuItem.Text = "Show subpanes";
 			this.showSubpanesToolStripMenuItem.ToolTipText = "Preview prt1 sub-layouts from archive sibling .bflyt files";
 			this.showSubpanesToolStripMenuItem.Click += new System.EventHandler(this.showSubpanesToolStripMenuItem_Click);
+			// 
+			// forceAllVisibleToolStripMenuItem
+			// 
+			this.forceAllVisibleToolStripMenuItem.CheckOnClick = true;
+			this.forceAllVisibleToolStripMenuItem.Name = "forceAllVisibleToolStripMenuItem";
+			this.forceAllVisibleToolStripMenuItem.Size = new System.Drawing.Size(200, 22);
+			this.forceAllVisibleToolStripMenuItem.Text = "Force all visible";
+			this.forceAllVisibleToolStripMenuItem.ToolTipText = "Preview panes that are hidden at rest (e.g. data-driven Energy status)";
+			this.forceAllVisibleToolStripMenuItem.Click += new System.EventHandler(this.forceAllVisibleToolStripMenuItem_Click);
 			// 
 			// expandAllToolStripMenuItem
 			// 
@@ -548,6 +559,7 @@
         private System.Windows.Forms.ToolStripMenuItem paletteToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem showPaneFramesToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem showSubpanesToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem forceAllVisibleToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem expandAllToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem collapseAllToolStripMenuItem;
         private System.Windows.Forms.ContextMenuStrip PaneMenuStrip;

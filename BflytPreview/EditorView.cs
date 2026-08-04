@@ -132,6 +132,7 @@ namespace BflytPreview
 
 			SaveTo = saveTo;
 			showSubpanesToolStripMenuItem.Checked = Settings.Default.PreviewSubLayouts;
+			forceAllVisibleToolStripMenuItem.Checked = Settings.Default.ForceAllVisible;
 		}
 
         #region OnLoad
@@ -272,7 +273,9 @@ namespace BflytPreview
 
 			void RecursiveRenderPane(Pan1Pane p)
 			{
-				if (!p.ParentVisibility)
+				if (p.Scale.X == 0 || p.Scale.Y == 0)
+					return;
+				if (!Settings.Default.ForceAllVisible && !p.ParentVisibility)
 					return;
 
 				var color = Settings.Default.PaneColor;
@@ -303,21 +306,22 @@ namespace BflytPreview
 					GL.Disable(EnableCap.Texture2D);
 					if (showPaneFramesToolStripMenuItem.Checked || isMarqueeHit)
 					{
+						var outlineRect = p.GetTransformedRect(requireVisible: !Settings.Default.ForceAllVisible);
 						if (isTreeSelected && showPaneFramesToolStripMenuItem.Checked)
 						{
 							DrawOnTop = p;
 							GL.GetFloat(GetPName.ModelviewMatrix, DrawOnTopTransform);
 						}
 						else if (isMarqueeHit)
-							DrawPane(p.transformedRect, Settings.Default.SelectedColor);
+							DrawPane(outlineRect, Settings.Default.SelectedColor);
 						else if (showPaneFramesToolStripMenuItem.Checked)
 						{
 							if (isPaletteHit)
-								DrawPane(p.transformedRect, Settings.Default.SelectedColor);
+								DrawPane(outlineRect, Settings.Default.SelectedColor);
 							else if (isFilterRoot)
-								DrawPane(p.transformedRect, FilterRootOutlineColor);
+								DrawPane(outlineRect, FilterRootOutlineColor);
 							else
-								DrawPane(p.transformedRect, color);
+								DrawPane(outlineRect, color);
 						}
 					}
 					GL.Enable(EnableCap.Texture2D);
@@ -343,8 +347,9 @@ namespace BflytPreview
 			if (DrawOnTop != null && showPaneFramesToolStripMenuItem.Checked)
 			{
 				GL.LoadMatrix(DrawOnTopTransform);
-                DrawPane(DrawOnTop.transformedRect, Settings.Default.SelectedColor);
-                DrawPaneMiddlePoint(DrawOnTop.transformedRect, Settings.Default.SelectedColor);
+				var topRect = DrawOnTop.GetTransformedRect(requireVisible: !Settings.Default.ForceAllVisible);
+                DrawPane(topRect, Settings.Default.SelectedColor);
+                DrawPaneMiddlePoint(topRect, Settings.Default.SelectedColor);
             }
 
 			GL.Disable(EnableCap.Texture2D);
@@ -402,7 +407,7 @@ namespace BflytPreview
 				cTL.W = cTR.W = cBL.W = cBR.W = paneAlpha;
 			}
 
-			var rect = pic.transformedRect;
+			var rect = pic.GetTransformedRect(requireVisible: !Settings.Default.ForceAllVisible);
 			if (rect.width <= 0 || rect.height <= 0)
 				return;
 			var uv = (pic.UVCoords != null && pic.UVCoords.Length > 0)
@@ -485,7 +490,7 @@ namespace BflytPreview
 			if (cTL.W <= 0f && cTR.W <= 0f && cBL.W <= 0f && cBR.W <= 0f)
 				cTL.W = cTR.W = cBL.W = cBR.W = paneAlpha;
 
-			var rect = wnd.transformedRect;
+			var rect = wnd.GetTransformedRect(requireVisible: !Settings.Default.ForceAllVisible);
 			float dX = rect.x;
 			// Toolbox DrawQuad uses Y-up with (x,y) as the top edge and height extending downward.
 			// transformedRect.y is the bottom edge; convert so piece math matches Toolbox.
@@ -920,9 +925,9 @@ namespace BflytPreview
 
 		void RenderPaneSubtree(Pan1Pane p, int variantIndex = 0)
 		{
-			if (!p.ParentVisibility)
-				return;
 			if (p.Scale.X == 0 || p.Scale.Y == 0)
+				return;
+			if (!Settings.Default.ForceAllVisible && !p.ParentVisibility)
 				return;
 
 			GL.PushMatrix();
@@ -946,8 +951,10 @@ namespace BflytPreview
 			// Mutually exclusive icon variants: null-pane siblings with exactly one Visible at
 			// rest (PaLoadingIconNum_00). Ignore txt1 — it stays on while icons swap.
 			// Only plain pan1 nodes count so pouch tabs (mixed pic1 + hidden pan1) stay alone.
+			// Skip when Force all visible — show every variant for inspection.
 			var variantKids = kids.Where(k => k.GetType() == typeof(Pan1Pane)).ToList();
-			bool exclusiveVariants = variantKids.Count > 1
+			bool exclusiveVariants = !Settings.Default.ForceAllVisible
+				&& variantKids.Count > 1
 				&& variantKids.Count(k => k.Visible) == 1
 				&& variantKids.Count(k => !k.Visible) >= 2;
 
@@ -990,7 +997,7 @@ namespace BflytPreview
 			if (text.Length == 0)
 				return;
 
-			var rect = txt.transformedRect;
+			var rect = txt.GetTransformedRect(requireVisible: !Settings.Default.ForceAllVisible);
 			if (rect.width <= 0 || rect.height <= 0)
 				return;
 
@@ -1803,6 +1810,13 @@ namespace BflytPreview
 			glControl?.Invalidate();
 		}
 
+		private void forceAllVisibleToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			Settings.Default.ForceAllVisible = forceAllVisibleToolStripMenuItem.Checked;
+			Settings.Default.Save();
+			glControl?.Invalidate();
+		}
+
 		private void addCheckedToFilterToolStripMenuItem_Click(object sender, EventArgs e)
 		{
 			ApplyCheckedPanesAsFilter();
@@ -2163,7 +2177,7 @@ namespace BflytPreview
 
 		void CachePaneScreenBounds(Pan1Pane pane)
 		{
-			var r = pane.transformedRect;
+			var r = pane.GetTransformedRect(requireVisible: !Settings.Default.ForceAllVisible);
 			if (r.width <= 0 || r.height <= 0)
 				return;
 

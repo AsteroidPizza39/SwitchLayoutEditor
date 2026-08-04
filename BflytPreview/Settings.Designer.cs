@@ -106,5 +106,17 @@ namespace BflytPreview {
                 this["PreviewSubLayouts"] = value;
             }
         }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool ForceAllVisible {
+            get {
+                return ((bool)(this["ForceAllVisible"]));
+            }
+            set {
+                this["ForceAllVisible"] = value;
+            }
+        }
     }
 }
