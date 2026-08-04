@@ -32,10 +32,18 @@ namespace BflytPreview
 		/// <summary>Number of .bflyt entries found in the archive (or directory).</summary>
 		public int LayoutFileCount { get; }
 
+		/// <summary>Raw SARC file map (shared with PatternAnimCache for anim/ lookups).</summary>
+		public Dictionary<string, byte[]> SarcFiles => sarcFiles;
+
+		/// <summary>Optional filesystem fallback directory.</summary>
+		public string SearchDirectory => searchDirectory;
+
 		/// <summary>
-		/// Suitable for "preview sub-layouts": archive-backed with more than one layout file.
+		/// Suitable for "preview sub-layouts": archive with multiple layouts, or a
+		/// filesystem folder that can resolve sibling blyt/anim files.
 		/// </summary>
-		public bool CanPreviewSiblingLayouts => FromArchive && LayoutFileCount > 1;
+		public bool CanPreviewSiblingLayouts =>
+			(FromArchive && LayoutFileCount > 1) || !string.IsNullOrEmpty(searchDirectory);
 
 		public static PartsLayoutCache FromSarc(SarcData sarc, string fallbackDirectory = null)
 		{

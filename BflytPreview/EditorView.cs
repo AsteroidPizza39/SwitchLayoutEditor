@@ -378,7 +378,10 @@ namespace BflytPreview
 
 			if (mat?.Textures != null && mat.Textures.Length > 0)
 			{
-				hasTexture = bntxPreview.BindPic1Texture(activeLayout, pic, white, black, out texId, out wrapS, out wrapT);
+				string texOverride = null;
+				if (activePatternTextures != null && !string.IsNullOrEmpty(mat.Name))
+					activePatternTextures.TryGetValue(mat.Name, out texOverride);
+				hasTexture = bntxPreview.BindPic1Texture(activeLayout, pic, white, black, out texId, out wrapS, out wrapT, texOverride);
 				if (mat.TextureTransformations != null && mat.TextureTransformations.Length > 0)
 				{
 					var t = mat.TextureTransformations[0];
@@ -400,6 +403,8 @@ namespace BflytPreview
 			}
 
 			var rect = pic.transformedRect;
+			if (rect.width <= 0 || rect.height <= 0)
+				return;
 			var uv = (pic.UVCoords != null && pic.UVCoords.Length > 0)
 				? pic.UVCoords[0]
 				: new Pic1Pane.UVCoord
@@ -876,19 +881,26 @@ namespace BflytPreview
 			if (Math.Abs(mx) < 1e-6f) mx = 1f;
 			if (Math.Abs(my) < 1e-6f) my = 1f;
 
-			// Pa_Sage_03 → variant 3, etc. Parts hide alternate icons behind anim; pick by instance index.
+			// Pa_Category_03 → pattern/variant index 3 (FLTP + exclusive-child selection).
 			int variantIndex = ParseTrailingIndex(prt.PaneName);
 
+			var previousPatterns = activePatternTextures;
+			if (patternAnimCache != null)
+				activePatternTextures = patternAnimCache.GetOverrides(prt.PartName, variantIndex);
+
+			GL.PushMatrix();
 			GL.Scale(mx, my, 1f);
 			var previous = activeLayout;
 			activeLayout = partLayout;
 			try
 			{
-				RenderPaneSubtree(partLayout.ElementsRoot, variantIndex, forceVisible: false);
+				RenderPaneSubtree(partLayout.ElementsRoot, variantIndex);
 			}
 			finally
 			{
 				activeLayout = previous;
+				activePatternTextures = previousPatterns;
+				GL.PopMatrix();
 			}
 		}
 
@@ -906,10 +918,9 @@ namespace BflytPreview
 			return 0;
 		}
 
-		void RenderPaneSubtree(Pan1Pane p, int variantIndex = 0, bool forceVisible = false)
+		void RenderPaneSubtree(Pan1Pane p, int variantIndex = 0)
 		{
-			// forceVisible: reveal a normally-hidden part variant (e.g. sage icons).
-			if (!forceVisible && !p.ParentVisibility)
+			if (!p.ParentVisibility)
 				return;
 			if (p.Scale.X == 0 || p.Scale.Y == 0)
 				return;
@@ -932,20 +943,40 @@ namespace BflytPreview
 			}
 
 			var kids = p.Children.OfType<Pan1Pane>().ToList();
-			// Mutually exclusive variants: one visible at rest, others hidden for anim switching.
-			bool exclusiveVariants = kids.Count > 1
-				&& kids.Count(k => k.Visible) == 1
-				&& kids.Any(k => !k.Visible);
+			// Mutually exclusive icon variants: null-pane siblings with exactly one Visible at
+			// rest (PaLoadingIconNum_00). Ignore txt1 — it stays on while icons swap.
+			// Only plain pan1 nodes count so pouch tabs (mixed pic1 + hidden pan1) stay alone.
+			var variantKids = kids.Where(k => k.GetType() == typeof(Pan1Pane)).ToList();
+			bool exclusiveVariants = variantKids.Count > 1
+				&& variantKids.Count(k => k.Visible) == 1
+				&& variantKids.Count(k => !k.Visible) >= 2;
 
 			if (exclusiveVariants)
 			{
-				int idx = Math.Max(0, Math.Min(variantIndex, kids.Count - 1));
-				RenderPaneSubtree(kids[idx], variantIndex, forceVisible: true);
+				// Temporarily reveal the index-chosen variant so ParentVisibility /
+				// transformedRect work for its pic1 children (shared cached part layout).
+				int idx = Math.Max(0, Math.Min(variantIndex, variantKids.Count - 1));
+				var saved = new bool[variantKids.Count];
+				for (int i = 0; i < variantKids.Count; i++)
+				{
+					saved[i] = variantKids[i].Visible;
+					variantKids[i].Visible = (i == idx);
+				}
+				try
+				{
+					foreach (var c in kids)
+						RenderPaneSubtree(c, variantIndex);
+				}
+				finally
+				{
+					for (int i = 0; i < variantKids.Count; i++)
+						variantKids[i].Visible = saved[i];
+				}
 			}
 			else
 			{
 				foreach (var c in kids)
-					RenderPaneSubtree(c, variantIndex, forceVisible: false);
+					RenderPaneSubtree(c, variantIndex);
 			}
 			GL.PopMatrix();
 		}

@@ -92,7 +92,8 @@ namespace BflytPreview
 			Vector4 black,
 			out int texId,
 			out BflytMaterial.TextureReference.WRAPS wrapS,
-			out BflytMaterial.TextureReference.WRAPS wrapT)
+			out BflytMaterial.TextureReference.WRAPS wrapT,
+			string textureNameOverride = null)
 		{
 			if (pane == null)
 			{
@@ -101,13 +102,17 @@ namespace BflytPreview
 				wrapT = BflytMaterial.TextureReference.WRAPS.Clamp;
 				return false;
 			}
-			return BindMaterialTexture(layout, pane.MaterialIndex, white, black, out texId, out wrapS, out wrapT);
+			return BindMaterialTexture(layout, pane.MaterialIndex, white, black, out texId, out wrapS, out wrapT, textureNameOverride);
 		}
 
 		/// <summary>
 		/// Bind material texture 0 with channel swizzle + white/black interpolate baked
 		/// (Pic1 / window frames / content).
 		/// </summary>
+		/// <param name="textureNameOverride">
+		/// Optional FLTP pattern texture name (e.g. IconBow_72x72^s). When set, replaces the
+		/// material's static txl1 reference while keeping wrap modes from the material.
+		/// </param>
 		public bool BindMaterialTexture(
 			BflytFile layout,
 			ushort materialIndex,
@@ -115,7 +120,8 @@ namespace BflytPreview
 			Vector4 black,
 			out int texId,
 			out BflytMaterial.TextureReference.WRAPS wrapS,
-			out BflytMaterial.TextureReference.WRAPS wrapT)
+			out BflytMaterial.TextureReference.WRAPS wrapT,
+			string textureNameOverride = null)
 		{
 			texId = 0;
 			wrapS = BflytMaterial.TextureReference.WRAPS.Clamp;
@@ -133,12 +139,18 @@ namespace BflytPreview
 			var texRef = mat.Textures[0];
 			wrapS = texRef.WrapS;
 			wrapT = texRef.WrapT;
-			if (texRef.TextureId >= layout.Tex1.Textures.Count)
-				return false;
 
-			string name = layout.Tex1.Textures[texRef.TextureId];
-			if (!TryGetRaw(name, out var raw))
-				return false;
+			string name = textureNameOverride;
+			RawTexture raw = default;
+			if (string.IsNullOrEmpty(name) || !TryGetRaw(name, out raw))
+			{
+				// Missing/invalid FLTP override → fall back to the material's static tex.
+				if (texRef.TextureId >= layout.Tex1.Textures.Count)
+					return false;
+				name = layout.Tex1.Textures[texRef.TextureId];
+				if (!TryGetRaw(name, out raw))
+					return false;
+			}
 
 			var key = MakeKey(name, white, black);
 			if (!shadedGl.TryGetValue(key, out texId))
