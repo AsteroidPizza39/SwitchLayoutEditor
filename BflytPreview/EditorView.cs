@@ -559,15 +559,40 @@ namespace BflytPreview
 					? dYTop
 					: dYTop - frameTop + wnd.StretchTop;
 
-				DrawWindowQuad(
-					wnd.Content.MaterialIndex,
-					contentX, contentTop, contentW, contentH,
-					uv.TopLeft.X, uv.TopLeft.Y,
-					uv.TopRight.X, uv.TopRight.Y,
-					uv.BottomRight.X, uv.BottomRight.Y,
-					uv.BottomLeft.X, uv.BottomLeft.Y,
-					cTL, cTR, cBR, cBL,
-					Wnd1Pane.WindowFrameTexFlip.None);
+				if (contentW > 0f && contentH > 0f)
+				{
+					DrawWindowQuad(
+						wnd.Content.MaterialIndex,
+						contentX, contentTop, contentW, contentH,
+						uv.TopLeft.X, uv.TopLeft.Y,
+						uv.TopRight.X, uv.TopRight.Y,
+						uv.BottomRight.X, uv.BottomRight.Y,
+						uv.BottomLeft.X, uv.BottomLeft.Y,
+						cTL, cTR, cBR, cBL,
+						Wnd1Pane.WindowFrameTexFlip.None);
+				}
+				else if (wnd.Kind == Wnd1Pane.WindowKind.Around &&
+					contentW > 0f &&
+					frameTop + frameBottom > paneH + 0.5f)
+				{
+					// Short Around window: contentH ≤ 0 because frame strips overlap.
+					// Paint White8 in the band below the top frame (same band LB covers on
+					// the left) so the cream ledge spans to the right — mirrors W_BaseFB's
+					// content fill, using FrameElement/stretch for X/W.
+					float bandH = paneH - frameTop + wnd.StretchTop;
+					if (bandH > 0f)
+					{
+						DrawWindowQuad(
+							wnd.Content.MaterialIndex,
+							contentX, dYTop - frameTop + wnd.StretchTop, contentW, bandH,
+							uv.TopLeft.X, uv.TopLeft.Y,
+							uv.TopRight.X, uv.TopRight.Y,
+							uv.BottomRight.X, uv.BottomRight.Y,
+							uv.BottomLeft.X, uv.BottomLeft.Y,
+							cTL, cTR, cBR, cBL,
+							Wnd1Pane.WindowFrameTexFlip.None);
+					}
+				}
 			}
 
 			if (wnd.Frames == null || wnd.Frames.Count == 0)
@@ -691,32 +716,59 @@ namespace BflytPreview
 
 			if (count >= 4)
 			{
+				// FC4 materials are corners: LT, RT, LB, RB (WND1 SetFrames names).
+				// LT → top strip, RT → right strip, LB → left strip, RB → bottom strip.
 				float uExtent = (paneW - fl) / fl;
 				float vExtent = (paneH - ft) / ft;
+				bool overlapH = ft + fb > paneH + 0.5f;
 
-				// TL — top strip across (width - right frame)
+				// LT — top strip across (width - right frame).
 				DrawWindowQuad(wnd.Frames[0].MaterialIndex,
 					dX, dYTop, paneW - fr, ft,
 					0, 0, uExtent, 0, uExtent, 1, 0, 1,
 					colors[0], colors[1], colors[2], colors[3], wnd.Frames[0].TextureFlip);
 
-				// TR — right strip down from top
-				DrawWindowQuad(wnd.Frames[1].MaterialIndex,
-					dX + paneW - fr, dYTop, fr, paneH - fb,
-					0, 0, 1, 0, 1, vExtent, 0, vExtent,
-					colors[0], colors[1], colors[2], colors[3], wnd.Frames[1].TextureFlip);
+				if (overlapH)
+				{
+					// Short header: LB drops a tab below LT on the left. RT must mirror that
+					// on the right (full pane height), and RB sits in the same band as LB.
+					float trV = paneH / ft;
+					DrawWindowQuad(wnd.Frames[1].MaterialIndex,
+						dX + paneW - fr, dYTop, fr, paneH,
+						0, 0, 1, 0, 1, trV, 0, trV,
+						colors[0], colors[1], colors[2], colors[3], wnd.Frames[1].TextureFlip);
 
-				// BL — left strip below the top frame
-				DrawWindowQuad(wnd.Frames[2].MaterialIndex,
-					dX, dYTop - ft, fl, paneH - ft,
-					0, 1 - vExtent, 1, 1 - vExtent, 1, 1, 0, 1,
-					colors[0], colors[1], colors[2], colors[3], wnd.Frames[2].TextureFlip);
+					DrawWindowQuad(wnd.Frames[2].MaterialIndex,
+						dX, dYTop - ft, fl, paneH - ft,
+						0, 1 - vExtent, 1, 1 - vExtent, 1, 1, 0, 1,
+						colors[0], colors[1], colors[2], colors[3], wnd.Frames[2].TextureFlip);
 
-				// BR — bottom strip from left frame to right edge
-				DrawWindowQuad(wnd.Frames[3].MaterialIndex,
-					dX + fl, dYTop - paneH + fb, paneW - fl, fb,
-					1 - uExtent, 0, 1, 0, 1, 1, 1 - uExtent, 1,
-					colors[0], colors[1], colors[2], colors[3], wnd.Frames[3].TextureFlip);
+					// RB — same band as LB; UV layout matches LT + Rotate180 so Clamp
+					// extends the opaque fill across (Toolbox's 1-uExtent form).
+					float brH = paneH - ft;
+					DrawWindowQuad(wnd.Frames[3].MaterialIndex,
+						dX + fl, dYTop - paneH + brH, paneW - fl, brH,
+						1 - uExtent, 0, 1, 0, 1, 1, 1 - uExtent, 1,
+						colors[0], colors[1], colors[2], colors[3], wnd.Frames[3].TextureFlip);
+				}
+				else
+				{
+					// Tall Around (e.g. W_BaseFB_00) — Toolbox FC4 L-strips.
+					DrawWindowQuad(wnd.Frames[1].MaterialIndex,
+						dX + paneW - fr, dYTop, fr, paneH - fb,
+						0, 0, 1, 0, 1, vExtent, 0, vExtent,
+						colors[0], colors[1], colors[2], colors[3], wnd.Frames[1].TextureFlip);
+
+					DrawWindowQuad(wnd.Frames[2].MaterialIndex,
+						dX, dYTop - ft, fl, paneH - ft,
+						0, 1 - vExtent, 1, 1 - vExtent, 1, 1, 0, 1,
+						colors[0], colors[1], colors[2], colors[3], wnd.Frames[2].TextureFlip);
+
+					DrawWindowQuad(wnd.Frames[3].MaterialIndex,
+						dX + fl, dYTop - paneH + fb, paneW - fl, fb,
+						1 - uExtent, 0, 1, 0, 1, 1, 1 - uExtent, 1,
+						colors[0], colors[1], colors[2], colors[3], wnd.Frames[3].TextureFlip);
+				}
 				return;
 			}
 
@@ -790,8 +842,11 @@ namespace BflytPreview
 			if (hasTexture)
 			{
 				GL.Enable(EnableCap.Texture2D);
-				GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)ToGlWrap(wrapS));
-				GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)ToGlWrap(wrapT));
+				// Window frame strips use UVs past 1 to *extend* the edge texel. Always
+				// ClampToEdge here — material wrap flags are often Repeat/mis-packed and
+				// would tile the corner motif along the strip (choppy scalloped edges).
+				GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+				GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
 			}
 			else
 			{
