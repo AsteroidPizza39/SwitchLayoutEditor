@@ -233,6 +233,9 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="BntxPreviewCache.cs" />
+    <Compile Include="LayoutAnimDiscovery.cs" />
+    <Compile Include="LayoutAnimEvaluator.cs" />
+    <Compile Include="LayoutAnimPanel.cs" />
     <Compile Include="LayoutDisplayColor.cs" />
     <Compile Include="LayoutUndoStack.cs" />
     <Compile Include="ModernFolderBrowser.cs" />

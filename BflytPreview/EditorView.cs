@@ -28,6 +28,8 @@ namespace BflytPreview
 		PatternAnimCache patternAnimCache;
 		/// <summary>Active FLTP overrides (material name → texture name) while drawing a part instance.</summary>
 		Dictionary<string, string> activePatternTextures;
+		LayoutAnimPanel animPanel;
+		LayoutAnimState layoutAnimState;
 		IFileWriter _saveTo;
 		readonly BntxPreviewCache bntxPreview = new BntxPreviewCache();
 		readonly Dictionary<string, int> textGlTextures = new Dictionary<string, int>();
@@ -133,6 +135,216 @@ namespace BflytPreview
 			SaveTo = saveTo;
 			showSubpanesToolStripMenuItem.Checked = Settings.Default.PreviewSubLayouts;
 			forceAllVisibleToolStripMenuItem.Checked = Settings.Default.ForceAllVisible;
+			InitAnimUi();
+		}
+
+		void InitAnimUi()
+		{
+			var columnSplit = new SplitContainer
+			{
+				Dock = DockStyle.Fill,
+				Orientation = Orientation.Horizontal,
+				Panel1MinSize = 80,
+				Panel2MinSize = 120,
+			};
+
+			var moved = new Control[splitContainer2.Panel2.Controls.Count];
+			splitContainer2.Panel2.Controls.CopyTo(moved, 0);
+			splitContainer2.Panel2.Controls.Clear();
+			foreach (var c in moved)
+				columnSplit.Panel1.Controls.Add(c);
+
+			animPanel = new LayoutAnimPanel();
+			animPanel.AnimStateChanged += (s, e) =>
+			{
+				layoutAnimState = animPanel.AnimState;
+				glControl?.Invalidate();
+			};
+			animPanel.FocusPaneRequested += (s, paneName) => FocusPaneByName(paneName);
+			animPanel.OpenInBflanEditorRequested += (s, e) => OpenActiveBflanInEditor();
+			columnSplit.Panel2.Controls.Add(animPanel);
+			splitContainer2.Panel2.Controls.Add(columnSplit);
+
+			// Defer splitter until layout has a real size.
+			Load += (s, e) =>
+			{
+				try
+				{
+					int h = columnSplit.Height;
+					if (h > 250)
+						columnSplit.SplitterDistance = Math.Max(100, h * 55 / 100);
+				}
+				catch { }
+				RefreshAnimDiscovery();
+			};
+		}
+
+		void RefreshAnimDiscovery()
+		{
+			if (animPanel == null) return;
+			string layoutName = null;
+			string path = SaveTo?.Path;
+			if (!string.IsNullOrEmpty(path))
+				layoutName = Path.GetFileName(path);
+			var refs = LayoutAnimDiscovery.FindForLayout(
+				layoutName,
+				partsCache?.SarcFiles,
+				partsCache?.SearchDirectory,
+				SaveTo);
+			animPanel.LoadAnimations(refs);
+		}
+
+		void FocusPaneByName(string paneName)
+		{
+			if (string.IsNullOrEmpty(paneName) || layout?.ElementsRoot == null)
+				return;
+			Pan1Pane found = FindPaneByName(layout.ElementsRoot, paneName);
+			if (found == null) return;
+			var node = FindTreeNodeForPane(found);
+			if (node != null)
+			{
+				treeView1.SelectedNode = node;
+				node.EnsureVisible();
+			}
+		}
+
+		static Pan1Pane FindPaneByName(Pan1Pane root, string name)
+		{
+			if (root == null) return null;
+			if (string.Equals(root.PaneName, name, StringComparison.OrdinalIgnoreCase))
+				return root;
+			foreach (var c in root.Children)
+			{
+				if (c is Pan1Pane p)
+				{
+					var hit = FindPaneByName(p, name);
+					if (hit != null) return hit;
+				}
+			}
+			return null;
+		}
+
+		void OpenActiveBflanInEditor()
+		{
+			if (animPanel?.ActiveBflan == null) return;
+			IFileWriter writer = animPanel.ActiveWriter;
+			if (writer == null && !string.IsNullOrEmpty(animPanel.ActiveRef?.FilePath))
+				writer = new DiskFileProvider(animPanel.ActiveRef.FilePath);
+			var ed = new BflanEditor(animPanel.ActiveBflan, writer);
+			Form host = FindForm();
+			while (host != null && !(host is MainForm))
+				host = host.Owner ?? host.ParentForm;
+			if (host is MainForm main)
+				main.OpenForm(ed);
+			else
+			{
+				ed.TopLevel = true;
+				ed.Show(this);
+			}
+		}
+
+		struct AnimPaneBackup
+		{
+			public SwitchThemes.Common.Vector3 Position, Rotation;
+			public SwitchThemes.Common.Vector2 Scale, Size;
+			public bool Visible;
+			public byte Alpha;
+		}
+
+		bool ApplyAnimPaneOverlay(Pan1Pane p, out AnimPaneBackup bak)
+		{
+			bak = new AnimPaneBackup
+			{
+				Position = p.Position,
+				Rotation = p.Rotation,
+				Scale = p.Scale,
+				Size = p.Size,
+				Visible = p.Visible,
+				Alpha = p.Alpha,
+			};
+			if (layoutAnimState == null || string.IsNullOrEmpty(p.PaneName))
+				return false;
+
+			var pos = p.Position;
+			var rot = p.Rotation;
+			var scale = p.Scale;
+			var size = p.Size;
+			bool changed = false;
+
+			if (layoutAnimState.TryGetPaneSrt(p.PaneName, AnimLpaTarget.TranslateX, out float tx))
+			{ pos.X = tx; changed = true; }
+			if (layoutAnimState.TryGetPaneSrt(p.PaneName, AnimLpaTarget.TranslateY, out float ty))
+			{ pos.Y = ty; changed = true; }
+			if (layoutAnimState.TryGetPaneSrt(p.PaneName, AnimLpaTarget.TranslateZ, out float tz))
+			{ pos.Z = tz; changed = true; }
+			if (layoutAnimState.TryGetPaneSrt(p.PaneName, AnimLpaTarget.RotateX, out float rx))
+			{ rot.X = rx; changed = true; }
+			if (layoutAnimState.TryGetPaneSrt(p.PaneName, AnimLpaTarget.RotateY, out float ry))
+			{ rot.Y = ry; changed = true; }
+			if (layoutAnimState.TryGetPaneSrt(p.PaneName, AnimLpaTarget.RotateZ, out float rz))
+			{ rot.Z = rz; changed = true; }
+			if (layoutAnimState.TryGetPaneSrt(p.PaneName, AnimLpaTarget.ScaleX, out float sx))
+			{ scale.X = sx; changed = true; }
+			if (layoutAnimState.TryGetPaneSrt(p.PaneName, AnimLpaTarget.ScaleY, out float sy))
+			{ scale.Y = sy; changed = true; }
+			if (layoutAnimState.TryGetPaneSrt(p.PaneName, AnimLpaTarget.SizeX, out float wx))
+			{ size.X = wx; changed = true; }
+			if (layoutAnimState.TryGetPaneSrt(p.PaneName, AnimLpaTarget.SizeY, out float hy))
+			{ size.Y = hy; changed = true; }
+
+			if (layoutAnimState.TryGetPaneVisible(p.PaneName, out bool vis))
+			{
+				p.Visible = vis;
+				changed = true;
+			}
+			if (layoutAnimState.TryGetPaneAlpha(p.PaneName, out float alpha))
+			{
+				p.Alpha = (byte)Math.Max(0, Math.Min(255, Math.Round(alpha)));
+				changed = true;
+			}
+
+			if (changed)
+			{
+				p.Position = pos;
+				p.Rotation = rot;
+				p.Scale = scale;
+				p.Size = size;
+			}
+			return changed;
+		}
+
+		static void RestoreAnimPaneOverlay(Pan1Pane p, AnimPaneBackup bak)
+		{
+			p.Position = bak.Position;
+			p.Rotation = bak.Rotation;
+			p.Scale = bak.Scale;
+			p.Size = bak.Size;
+			p.Visible = bak.Visible;
+			p.Alpha = bak.Alpha;
+		}
+
+		void ResolveMaterialColors(BflytMaterial mat, out RGBAColor black, out RGBAColor white)
+		{
+			black = mat != null ? mat.ForegroundColor : new RGBAColor(0, 0, 0, 0);
+			white = mat != null ? mat.BackgroundColor : new RGBAColor(255, 255, 255, 255);
+			if (layoutAnimState != null && mat != null)
+				layoutAnimState.ApplyMaterialColors(mat.Name, ref black, ref white);
+		}
+
+		static RGBAColor MultiplyRgb(RGBAColor color, RGBAColor tint)
+		{
+			return new RGBAColor(
+				(byte)Math.Min(255, (color.R * tint.R + 127) / 255),
+				(byte)Math.Min(255, (color.G * tint.G + 127) / 255),
+				(byte)Math.Min(255, (color.B * tint.B + 127) / 255),
+				(byte)Math.Min(255, (color.A * tint.A + 127) / 255));
+		}
+
+		RGBAColor AnimVertexColor(string paneName, RGBAColor baseColor, bool tl, bool tr, bool bl, bool br)
+		{
+			var c = baseColor;
+			layoutAnimState?.ApplyVertexColorCorner(paneName, tl, tr, bl, br, ref c);
+			return c;
 		}
 
         #region OnLoad
@@ -273,63 +485,72 @@ namespace BflytPreview
 
 			void RecursiveRenderPane(Pan1Pane p)
 			{
-				if (p.Scale.X == 0 || p.Scale.Y == 0)
-					return;
-				if (!Settings.Default.ForceAllVisible && !p.ParentVisibility)
-					return;
-
-				var color = Settings.Default.PaneColor;
-
-				GL.PushMatrix();
-				GL.Translate(p.Position.X, p.Position.Y, 0);
-				GL.Rotate(p.Rotation.Z, p.Rotation.X, p.Rotation.Y, p.Rotation.Z);
-				GL.Scale(p.Scale.X, p.Scale.Y, 1);
-
-				if (p.ViewInEditor)
+				bool overlay = ApplyAnimPaneOverlay(p, out var bak);
+				try
 				{
-					CachePaneScreenBounds(p);
+					if (p.Scale.X == 0 || p.Scale.Y == 0)
+						return;
+					if (!Settings.Default.ForceAllVisible && !p.ParentVisibility)
+						return;
 
-					bool isTreeSelected = treeView1.SelectedNode != null && (p == treeView1.SelectedNode.Tag as Pan1Pane);
-					bool isPaletteHit = hasPaletteHighlight && PaneUsesPaletteColor(p, paletteHighlightColor);
-					bool isFilterRoot = PaneFilter.IsFilterRoot(p);
-					bool isMarqueeHit = marqueePreviewHits.Contains(p);
+					var color = Settings.Default.PaneColor;
 
-					if (p is Pic1Pane pic)
-						DrawPicturePane(pic);
-					else if (p is Wnd1Pane wnd)
-						DrawWindowPane(wnd);
-					else if (p is Txt1Pane txt)
-						DrawTextPane(txt);
-					else if (p is Prt1Pane prt)
-						DrawPartsPane(prt);
+					GL.PushMatrix();
+					GL.Translate(p.Position.X, p.Position.Y, 0);
+					GL.Rotate(p.Rotation.Z, p.Rotation.X, p.Rotation.Y, p.Rotation.Z);
+					GL.Scale(p.Scale.X, p.Scale.Y, 1);
 
-					GL.Disable(EnableCap.Texture2D);
-					if (showPaneFramesToolStripMenuItem.Checked || isMarqueeHit)
+					if (p.ViewInEditor)
 					{
-						var outlineRect = p.GetTransformedRect(requireVisible: !Settings.Default.ForceAllVisible);
-						if (isTreeSelected && showPaneFramesToolStripMenuItem.Checked)
-						{
-							DrawOnTop = p;
-							GL.GetFloat(GetPName.ModelviewMatrix, DrawOnTopTransform);
-						}
-						else if (isMarqueeHit)
-							DrawPane(outlineRect, Settings.Default.SelectedColor);
-						else if (showPaneFramesToolStripMenuItem.Checked)
-						{
-							if (isPaletteHit)
-								DrawPane(outlineRect, Settings.Default.SelectedColor);
-							else if (isFilterRoot)
-								DrawPane(outlineRect, FilterRootOutlineColor);
-							else
-								DrawPane(outlineRect, color);
-						}
-					}
-					GL.Enable(EnableCap.Texture2D);
-				}
+						CachePaneScreenBounds(p);
 
-				foreach (var c in p.Children.Where(x => x is Pan1Pane))
-					RecursiveRenderPane((Pan1Pane)c);
-				GL.PopMatrix();
+						bool isTreeSelected = treeView1.SelectedNode != null && (p == treeView1.SelectedNode.Tag as Pan1Pane);
+						bool isPaletteHit = hasPaletteHighlight && PaneUsesPaletteColor(p, paletteHighlightColor);
+						bool isFilterRoot = PaneFilter.IsFilterRoot(p);
+						bool isMarqueeHit = marqueePreviewHits.Contains(p);
+
+						if (p is Pic1Pane pic)
+							DrawPicturePane(pic);
+						else if (p is Wnd1Pane wnd)
+							DrawWindowPane(wnd);
+						else if (p is Txt1Pane txt)
+							DrawTextPane(txt);
+						else if (p is Prt1Pane prt)
+							DrawPartsPane(prt);
+
+						GL.Disable(EnableCap.Texture2D);
+						if (showPaneFramesToolStripMenuItem.Checked || isMarqueeHit)
+						{
+							var outlineRect = p.GetTransformedRect(requireVisible: !Settings.Default.ForceAllVisible);
+							if (isTreeSelected && showPaneFramesToolStripMenuItem.Checked)
+							{
+								DrawOnTop = p;
+								GL.GetFloat(GetPName.ModelviewMatrix, DrawOnTopTransform);
+							}
+							else if (isMarqueeHit)
+								DrawPane(outlineRect, Settings.Default.SelectedColor);
+							else if (showPaneFramesToolStripMenuItem.Checked)
+							{
+								if (isPaletteHit)
+									DrawPane(outlineRect, Settings.Default.SelectedColor);
+								else if (isFilterRoot)
+									DrawPane(outlineRect, FilterRootOutlineColor);
+								else
+									DrawPane(outlineRect, color);
+							}
+						}
+						GL.Enable(EnableCap.Texture2D);
+					}
+
+					foreach (var c in p.Children.Where(x => x is Pan1Pane))
+						RecursiveRenderPane((Pan1Pane)c);
+					GL.PopMatrix();
+				}
+				finally
+				{
+					if (overlay)
+						RestoreAnimPaneOverlay(p, bak);
+				}
 			}
 
 			GL.Scale(1 * zoomFactor, -1 * zoomFactor, 1);
@@ -370,8 +591,9 @@ namespace BflytPreview
 
 			// SwitchThemesCommon names are misleading: BFLYT stores BlackColor then WhiteColor
 			// (same order as Switch Toolbox). ForegroundColor == Black, BackgroundColor == White.
-			var black = mat != null ? ToVec4(mat.ForegroundColor) : new Vector4(0f, 0f, 0f, 0f);
-			var white = mat != null ? ToVec4(mat.BackgroundColor) : new Vector4(1f, 1f, 1f, 1f);
+			ResolveMaterialColors(mat, out var blackRgba, out var whiteRgba);
+			var black = ToVec4(blackRgba);
+			var white = ToVec4(whiteRgba);
 			if (white.W <= 0f)
 				white.W = 1f;
 
@@ -398,10 +620,10 @@ namespace BflytPreview
 			if (paneAlpha <= 0f)
 				paneAlpha = 1f;
 
-			Vector4 cTL = ToVertexVec4(pic.ColorTopLeft, paneAlpha);
-			Vector4 cTR = ToVertexVec4(pic.ColorTopRight, paneAlpha);
-			Vector4 cBL = ToVertexVec4(pic.ColorBottomLeft, paneAlpha);
-			Vector4 cBR = ToVertexVec4(pic.ColorBottomRight, paneAlpha);
+			Vector4 cTL = ToVertexVec4(AnimVertexColor(pic.PaneName, pic.ColorTopLeft, true, false, false, false), paneAlpha);
+			Vector4 cTR = ToVertexVec4(AnimVertexColor(pic.PaneName, pic.ColorTopRight, false, true, false, false), paneAlpha);
+			Vector4 cBL = ToVertexVec4(AnimVertexColor(pic.PaneName, pic.ColorBottomLeft, false, false, true, false), paneAlpha);
+			Vector4 cBR = ToVertexVec4(AnimVertexColor(pic.PaneName, pic.ColorBottomRight, false, false, false, true), paneAlpha);
 			if (cTL.W <= 0f && cTR.W <= 0f && cBL.W <= 0f && cBR.W <= 0f)
 			{
 				cTL.W = cTR.W = cBL.W = cBR.W = paneAlpha;
@@ -483,10 +705,10 @@ namespace BflytPreview
 			if (paneAlpha <= 0f)
 				paneAlpha = 1f;
 
-			Vector4 cTL = ToVertexVec4(wnd.Content.ColorTopLeft, paneAlpha);
-			Vector4 cTR = ToVertexVec4(wnd.Content.ColorTopRight, paneAlpha);
-			Vector4 cBL = ToVertexVec4(wnd.Content.ColorBottomLeft, paneAlpha);
-			Vector4 cBR = ToVertexVec4(wnd.Content.ColorBottomRight, paneAlpha);
+			Vector4 cTL = ToVertexVec4(AnimVertexColor(wnd.PaneName, wnd.Content.ColorTopLeft, true, false, false, false), paneAlpha);
+			Vector4 cTR = ToVertexVec4(AnimVertexColor(wnd.PaneName, wnd.Content.ColorTopRight, false, true, false, false), paneAlpha);
+			Vector4 cBL = ToVertexVec4(AnimVertexColor(wnd.PaneName, wnd.Content.ColorBottomLeft, false, false, true, false), paneAlpha);
+			Vector4 cBR = ToVertexVec4(AnimVertexColor(wnd.PaneName, wnd.Content.ColorBottomRight, false, false, false, true), paneAlpha);
 			if (cTL.W <= 0f && cTR.W <= 0f && cBL.W <= 0f && cBR.W <= 0f)
 				cTL.W = cTR.W = cBL.W = cBR.W = paneAlpha;
 
@@ -818,8 +1040,9 @@ namespace BflytPreview
 			if (activeLayout.Mat1?.Materials != null && materialIndex < activeLayout.Mat1.Materials.Count)
 				mat = activeLayout.Mat1.Materials[materialIndex];
 
-			var black = mat != null ? ToVec4(mat.ForegroundColor) : new Vector4(0f, 0f, 0f, 0f);
-			var white = mat != null ? ToVec4(mat.BackgroundColor) : new Vector4(1f, 1f, 1f, 1f);
+			ResolveMaterialColors(mat, out var blackRgba, out var whiteRgba);
+			var black = ToVec4(blackRgba);
+			var white = ToVec4(whiteRgba);
 			if (white.W <= 0f)
 				white.W = 1f;
 
@@ -1060,12 +1283,23 @@ namespace BflytPreview
 			if (paneAlpha <= 0f)
 				paneAlpha = 1f;
 
+			BflytMaterial mat = null;
+			if (activeLayout.Mat1?.Materials != null && txt.MaterialIndex < activeLayout.Mat1.Materials.Count)
+				mat = activeLayout.Mat1.Materials[txt.MaterialIndex];
+			ResolveMaterialColors(mat, out _, out var matWhite);
+
+			RGBAColor topRgba = MultiplyRgb(txt.FontTopColor, matWhite);
+			RGBAColor bottomRgba = MultiplyRgb(txt.FontBottomColor, matWhite);
+			// FLVC LeftTop/LeftBottom map reasonably onto font top/bottom for text panes.
+			topRgba = AnimVertexColor(txt.PaneName, topRgba, true, false, false, false);
+			bottomRgba = AnimVertexColor(txt.PaneName, bottomRgba, false, false, true, false);
+
 			Color top = Color.FromArgb(
-				Math.Max(1, (int)(txt.FontTopColor.A * paneAlpha)),
-				txt.FontTopColor.R, txt.FontTopColor.G, txt.FontTopColor.B);
+				Math.Max(1, (int)(topRgba.A * paneAlpha)),
+				topRgba.R, topRgba.G, topRgba.B);
 			Color bottom = Color.FromArgb(
-				Math.Max(1, (int)(txt.FontBottomColor.A * paneAlpha)),
-				txt.FontBottomColor.R, txt.FontBottomColor.G, txt.FontBottomColor.B);
+				Math.Max(1, (int)(bottomRgba.A * paneAlpha)),
+				bottomRgba.R, bottomRgba.G, bottomRgba.B);
 
 			float fontH = Math.Max(8f, txt.FontXYSize.Y > 0 ? txt.FontXYSize.Y : rect.height * 0.75f);
 			string cacheKey = string.Format("{0}|{1}x{2}|{3}|{4}|{5:0.#}",
@@ -1152,8 +1386,9 @@ namespace BflytPreview
 			if (activeLayout.Mat1?.Materials != null && materialIndex < activeLayout.Mat1.Materials.Count)
 				mat = activeLayout.Mat1.Materials[materialIndex];
 
-			var black = mat != null ? ToVec4(mat.ForegroundColor) : new Vector4(0f, 0f, 0f, 0f);
-			var white = mat != null ? ToVec4(mat.BackgroundColor) : new Vector4(1f, 1f, 1f, 1f);
+			ResolveMaterialColors(mat, out var blackRgba, out var whiteRgba);
+			var black = ToVec4(blackRgba);
+			var white = ToVec4(whiteRgba);
 			if (white.W <= 0f)
 				white.W = 1f;
 
