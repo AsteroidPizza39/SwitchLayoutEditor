@@ -139,6 +139,7 @@ namespace BflytPreview
 		{
 			if (string.IsNullOrEmpty(name))
 				return name;
+			name = Path.GetFileName(name.Replace('\\', '/'));
 			if (name.EndsWith(".bflyt", StringComparison.OrdinalIgnoreCase))
 				return name.Substring(0, name.Length - 6);
 			return name;

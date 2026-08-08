@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using SwitchThemes.Common;
 using SwitchThemes.Common.Bflan;
+using SwitchThemes.Common.Bflyt;
 using static SwitchThemes.Common.Bflan.Pai1Section;
 
 namespace BflytPreview
@@ -85,6 +86,48 @@ namespace BflytPreview
 			new Dictionary<string, Dictionary<AnimLvcTarget, float>>(StringComparer.OrdinalIgnoreCase);
 		public readonly Dictionary<string, Dictionary<AnimLmcTarget, float>> MaterialColors =
 			new Dictionary<string, Dictionary<AnimLmcTarget, float>>(StringComparer.OrdinalIgnoreCase);
+
+		/// <summary>Panes with FLPA/FLVI/FLVC tracks in the active animation.</summary>
+		public readonly HashSet<string> AnimatedPaneNames =
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+		/// <summary>Materials with FLMC tracks — preview even when a parent pane is hidden at rest.</summary>
+		public readonly HashSet<string> AnimatedMaterialNames =
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+		public bool IsPreviewTarget(Pan1Pane pane, BflytFile layout)
+		{
+			if (pane == null || string.IsNullOrEmpty(pane.PaneName))
+				return false;
+			if (AnimatedPaneNames.Contains(pane.PaneName))
+				return true;
+			if (layout?.Mat1?.Materials == null)
+				return false;
+
+			if (pane is Pic1Pane pic && pic.MaterialIndex < layout.Mat1.Materials.Count)
+				return AnimatedMaterialNames.Contains(layout.Mat1.Materials[pic.MaterialIndex].Name);
+
+			if (pane is Txt1Pane txt && txt.MaterialIndex < layout.Mat1.Materials.Count)
+				return AnimatedMaterialNames.Contains(layout.Mat1.Materials[txt.MaterialIndex].Name);
+
+			if (pane is Wnd1Pane wnd)
+			{
+				if (wnd.Content != null && wnd.Content.MaterialIndex < layout.Mat1.Materials.Count
+					&& AnimatedMaterialNames.Contains(layout.Mat1.Materials[wnd.Content.MaterialIndex].Name))
+					return true;
+				if (wnd.Frames != null)
+				{
+					foreach (var frame in wnd.Frames)
+					{
+						if (frame.MaterialIndex < layout.Mat1.Materials.Count
+							&& AnimatedMaterialNames.Contains(layout.Mat1.Materials[frame.MaterialIndex].Name))
+							return true;
+					}
+				}
+			}
+
+			return false;
+		}
 
 		public bool TryGetPaneSrt(string paneName, AnimLpaTarget target, out float value)
 		{
@@ -277,6 +320,7 @@ namespace BflytPreview
 					if (string.Equals(tt, "FLPA", StringComparison.OrdinalIgnoreCase)
 						&& entry.Target == PaiEntry.AnimationTarget.Pane)
 					{
+						state.AnimatedPaneNames.Add(entry.Name);
 						var map = GetOrCreate(state.PaneSrt, entry.Name);
 						foreach (var te in tag.Entries)
 						{
@@ -288,6 +332,7 @@ namespace BflytPreview
 					else if (string.Equals(tt, "FLVI", StringComparison.OrdinalIgnoreCase)
 						&& entry.Target == PaiEntry.AnimationTarget.Pane)
 					{
+						state.AnimatedPaneNames.Add(entry.Name);
 						foreach (var te in tag.Entries)
 						{
 							float v = Sample(te.KeyFrames, frame);
@@ -297,6 +342,7 @@ namespace BflytPreview
 					else if (string.Equals(tt, "FLVC", StringComparison.OrdinalIgnoreCase)
 						&& entry.Target == PaiEntry.AnimationTarget.Pane)
 					{
+						state.AnimatedPaneNames.Add(entry.Name);
 						var map = GetOrCreate(state.PaneVertexColors, entry.Name);
 						foreach (var te in tag.Entries)
 						{
@@ -308,6 +354,7 @@ namespace BflytPreview
 					else if (string.Equals(tt, "FLMC", StringComparison.OrdinalIgnoreCase)
 						&& entry.Target == PaiEntry.AnimationTarget.Material)
 					{
+						state.AnimatedMaterialNames.Add(entry.Name);
 						var map = GetOrCreate(state.MaterialColors, entry.Name);
 						foreach (var te in tag.Entries)
 						{

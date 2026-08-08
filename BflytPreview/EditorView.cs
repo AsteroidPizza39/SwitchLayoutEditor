@@ -30,6 +30,7 @@ namespace BflytPreview
 		Dictionary<string, string> activePatternTextures;
 		LayoutAnimPanel animPanel;
 		LayoutAnimState layoutAnimState;
+		byte _paneEffectiveAlpha = 255;
 		IFileWriter _saveTo;
 		readonly BntxPreviewCache bntxPreview = new BntxPreviewCache();
 		readonly Dictionary<string, int> textGlTextures = new Dictionary<string, int>();
@@ -483,15 +484,25 @@ namespace BflytPreview
 			GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
 			GL.Enable(EnableCap.Texture2D);
 
-			void RecursiveRenderPane(Pan1Pane p)
+			void RecursiveRenderPane(Pan1Pane p, byte parentEffectiveAlpha, bool parentInfluenceAlpha)
 			{
 				bool overlay = ApplyAnimPaneOverlay(p, out var bak);
 				try
 				{
 					if (p.Scale.X == 0 || p.Scale.Y == 0)
 						return;
-					if (!Settings.Default.ForceAllVisible && !p.ParentVisibility)
-						return;
+
+					byte paneAlpha = p.Alpha;
+					byte effectiveAlpha = parentEffectiveAlpha == 255
+						? paneAlpha
+						: (byte)((paneAlpha * parentEffectiveAlpha) / 255);
+					if (!parentInfluenceAlpha)
+						effectiveAlpha = paneAlpha;
+
+					bool animPreview = layoutAnimState != null
+						&& layoutAnimState.IsPreviewTarget(p, layout);
+					bool shouldDraw = p.ViewInEditor
+						&& (Settings.Default.ForceAllVisible || p.ParentVisibility || animPreview);
 
 					var color = Settings.Default.PaneColor;
 
@@ -500,8 +511,9 @@ namespace BflytPreview
 					GL.Rotate(p.Rotation.Z, p.Rotation.X, p.Rotation.Y, p.Rotation.Z);
 					GL.Scale(p.Scale.X, p.Scale.Y, 1);
 
-					if (p.ViewInEditor)
+					if (shouldDraw)
 					{
+						_paneEffectiveAlpha = effectiveAlpha;
 						CachePaneScreenBounds(p);
 
 						bool isTreeSelected = treeView1.SelectedNode != null && (p == treeView1.SelectedNode.Tag as Pan1Pane);
@@ -521,7 +533,7 @@ namespace BflytPreview
 						GL.Disable(EnableCap.Texture2D);
 						if (showPaneFramesToolStripMenuItem.Checked || isMarqueeHit)
 						{
-							var outlineRect = p.GetTransformedRect(requireVisible: !Settings.Default.ForceAllVisible);
+							var outlineRect = p.GetTransformedRect(requireVisible: !Settings.Default.ForceAllVisible && !animPreview);
 							if (isTreeSelected && showPaneFramesToolStripMenuItem.Checked)
 							{
 								DrawOnTop = p;
@@ -542,8 +554,12 @@ namespace BflytPreview
 						GL.Enable(EnableCap.Texture2D);
 					}
 
+					bool childInfluence = parentInfluenceAlpha || p.InfluenceAlpha;
+					byte childParentAlpha = (p.InfluenceAlpha || parentInfluenceAlpha)
+						? effectiveAlpha
+						: (byte)255;
 					foreach (var c in p.Children.Where(x => x is Pan1Pane))
-						RecursiveRenderPane((Pan1Pane)c);
+						RecursiveRenderPane((Pan1Pane)c, childParentAlpha, childInfluence);
 					GL.PopMatrix();
 				}
 				finally
@@ -556,7 +572,7 @@ namespace BflytPreview
 			GL.Scale(1 * zoomFactor, -1 * zoomFactor, 1);
 			GL.Translate(x, y, 0);
 
-			RecursiveRenderPane(layout.ElementsRoot);
+			RecursiveRenderPane(layout.ElementsRoot, 255, false);
 			if (showPaneFramesToolStripMenuItem.Checked)
 			{
 				var root = layout.ElementsRoot;
@@ -616,7 +632,7 @@ namespace BflytPreview
 				}
 			}
 
-			float paneAlpha = pic.Alpha / 255f;
+			float paneAlpha = _paneEffectiveAlpha / 255f;
 			if (paneAlpha <= 0f)
 				paneAlpha = 1f;
 
@@ -624,6 +640,13 @@ namespace BflytPreview
 			Vector4 cTR = ToVertexVec4(AnimVertexColor(pic.PaneName, pic.ColorTopRight, false, true, false, false), paneAlpha);
 			Vector4 cBL = ToVertexVec4(AnimVertexColor(pic.PaneName, pic.ColorBottomLeft, false, false, true, false), paneAlpha);
 			Vector4 cBR = ToVertexVec4(AnimVertexColor(pic.PaneName, pic.ColorBottomRight, false, false, false, true), paneAlpha);
+			if (!hasTexture)
+			{
+				cTL = ModulateVertexByMaterial(cTL, white);
+				cTR = ModulateVertexByMaterial(cTR, white);
+				cBL = ModulateVertexByMaterial(cBL, white);
+				cBR = ModulateVertexByMaterial(cBR, white);
+			}
 			if (cTL.W <= 0f && cTR.W <= 0f && cBL.W <= 0f && cBR.W <= 0f)
 			{
 				cTL.W = cTR.W = cBL.W = cBR.W = paneAlpha;
@@ -701,7 +724,7 @@ namespace BflytPreview
 			if (wnd?.Content == null)
 				return;
 
-			float paneAlpha = wnd.Alpha / 255f;
+			float paneAlpha = _paneEffectiveAlpha / 255f;
 			if (paneAlpha <= 0f)
 				paneAlpha = 1f;
 
@@ -1279,7 +1302,7 @@ namespace BflytPreview
 			if (rect.width <= 0 || rect.height <= 0)
 				return;
 
-			float paneAlpha = txt.Alpha / 255f;
+			float paneAlpha = _paneEffectiveAlpha / 255f;
 			if (paneAlpha <= 0f)
 				paneAlpha = 1f;
 
@@ -1460,6 +1483,13 @@ namespace BflytPreview
 			Vector4.Transform(ref vec, ref transform, out var result);
 			GL.TexCoord2(0.5f + result.X, 0.5f + result.Y);
 		}
+
+		static Vector4 ModulateVertexByMaterial(Vector4 vertex, Vector4 materialWhite) =>
+			new Vector4(
+				vertex.X * materialWhite.X,
+				vertex.Y * materialWhite.Y,
+				vertex.Z * materialWhite.Z,
+				vertex.W * (materialWhite.W > 0f ? materialWhite.W : 1f));
 
 		static Vector4 ToVec4(RGBAColor c, float alphaMul = 1f) =>
 			new Vector4(c.R / 255f, c.G / 255f, c.B / 255f, (c.A / 255f) * alphaMul);
