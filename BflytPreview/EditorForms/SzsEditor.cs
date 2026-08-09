@@ -213,7 +213,7 @@ namespace BflytPreview.EditorForms
             }
         }
 
-        byte[] PackArchive()
+        byte[] PackArchive(int compressionLevel)
         {
             // If the output path is clearly a TotK .zs but we somehow lost wrap info, prefer ZSTD.
             if (archiveCompression == ArchiveCompression.None &&
@@ -224,6 +224,11 @@ namespace BflytPreview.EditorForms
                 ApplyCompressionUi();
             }
 
+            // Same contract as upstream: 0 = pack SARC with no Yaz0 wrap.
+            // ZSTD still needs a positive level (UI minimum is 1).
+            if (compressionLevel == 0 && archiveCompression != ArchiveCompression.Zstd)
+                return SARC.Pack(loadedSarc).Item2;
+
             var packed = SARC.Pack(loadedSarc);
             byte[] sarcBytes = packed.Item2;
 
@@ -232,7 +237,7 @@ namespace BflytPreview.EditorForms
                 case ArchiveCompression.Zstd:
                     try
                     {
-                        GameZstd.Instance.CompressionLevel = (int)numericUpDown1.Value;
+                        GameZstd.Instance.CompressionLevel = compressionLevel;
                         return GameZstd.Instance.Compress(sarcBytes, zstdDictionaryId);
                     }
                     catch (Exception ex)
@@ -245,13 +250,8 @@ namespace BflytPreview.EditorForms
                         return null;
                     }
                 case ArchiveCompression.Yaz0:
-                    int level = (int)numericUpDown1.Value;
-                    if (level <= 0)
-                        return sarcBytes;
-                    return ManagedYaz0.Compress(sarcBytes, level, packed.Item1);
+                    return ManagedYaz0.Compress(sarcBytes, compressionLevel, packed.Item1);
                 default:
-                    if (numericUpDown1.Value > 0)
-                        return ManagedYaz0.Compress(sarcBytes, (int)numericUpDown1.Value, packed.Item1);
                     return sarcBytes;
             }
         }
@@ -271,17 +271,31 @@ namespace BflytPreview.EditorForms
                 return;
 
             string path = sav.FileName;
-            string ext = Path.GetExtension(path)?.ToLowerInvariant() ?? "";
-            if (sav.FilterIndex == 1 || ext == ".zs")
+            string ext = Path.GetExtension(path) ?? "";
+            if (ext.Equals(".zs", StringComparison.OrdinalIgnoreCase))
                 archiveCompression = ArchiveCompression.Zstd;
-            else if (sav.FilterIndex == 2 || ext == ".szs")
+            else if (ext.Equals(".szs", StringComparison.OrdinalIgnoreCase))
+                archiveCompression = ArchiveCompression.Yaz0;
+            else if (ext.Equals(".sarc", StringComparison.OrdinalIgnoreCase) ||
+                     ext.Equals(".blarc", StringComparison.OrdinalIgnoreCase) ||
+                     ext.Equals(".pack", StringComparison.OrdinalIgnoreCase))
+                archiveCompression = ArchiveCompression.None;
+            else if (sav.FilterIndex == 1)
+                archiveCompression = ArchiveCompression.Zstd;
+            else if (sav.FilterIndex == 2)
                 archiveCompression = ArchiveCompression.Yaz0;
             else
                 archiveCompression = ArchiveCompression.None;
             ApplyCompressionUi();
 
+            var level = ext.Equals(".sarc", StringComparison.OrdinalIgnoreCase) ||
+                        ext.Equals(".blarc", StringComparison.OrdinalIgnoreCase) ||
+                        ext.Equals(".pack", StringComparison.OrdinalIgnoreCase)
+                ? 0
+                : (int)numericUpDown1.Value;
+
             SaveTo = new DiskFileProvider(path);
-            byte[] data = PackArchive();
+            byte[] data = PackArchive(level);
             if (data != null)
                 SaveTo.Save(data);
         }
@@ -374,13 +388,13 @@ namespace BflytPreview.EditorForms
         private void saveToSzsToolStripMenuItem_Click(object sender, EventArgs e)
         {
             if (SaveTo == null)
-            {
                 SaveSzsAs();
-                return;
+            else
+            {
+                byte[] data = PackArchive((int)numericUpDown1.Value);
+                if (data != null)
+                    SaveTo.Save(data);
             }
-            byte[] data = PackArchive();
-            if (data != null)
-                SaveTo.Save(data);
         }
 
         void FormBringToFront()
@@ -417,6 +431,7 @@ namespace BflytPreview.EditorForms
             var opn = new OpenFileDialog();
             if (opn.ShowDialog() != DialogResult.OK) return;
 
+            // Loadedsarc is modified in-place
             SzsPatcher P = new SzsPatcher(loadedSarc);
             LayoutPatch JSONLayout = LayoutPatch.Load(File.ReadAllText(opn.FileName));
 
